@@ -1,0 +1,13 @@
+{
+  "name": "Configure custom providers and docker compose startup",
+  "type": "feature",
+  "branch": "task/configure-custom-providers-docker",
+  "priority": "P2",
+  "description": "",
+  "depends_on": [],
+  "status": "planned",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "pending"
+}
