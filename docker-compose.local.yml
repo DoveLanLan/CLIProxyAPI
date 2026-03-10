@@ -1,4 +1,0 @@
-services:
-  cli-proxy-api:
-    ports: !override
-      - "8317:8317"

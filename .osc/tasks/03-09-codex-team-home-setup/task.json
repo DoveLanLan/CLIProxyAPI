@@ -5,9 +5,10 @@
   "priority": "P2",
   "description": "",
   "depends_on": [],
-  "status": "planned",
+  "status": "in_progress",
   "current_phase": 0,
   "next_action": [],
   "requires_change_workflow": true,
-  "change_workflow_status": "pending"
+  "change_workflow_status": "ready",
+  "started_at": "2026-03-10T03:06:17Z"
 }
