@@ -90,6 +90,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 #### C) Code style & patterns
 1. Target Go `1.26` and keep the module path `github.com/router-for-me/CLIProxyAPI/v6` intact when changing imports, scripts, or release metadata. — Evidence: `go.mod`, `.github/workflows/pr-test-build.yml`, `.github/workflows/release.yaml` (Documented; confidence: High)
+1.1. Never commit `config.yaml` (or any custom config file) to the repository, as it contains sensitive API keys, secrets, and environment-specific settings. Use `config.example.yaml` as the template for configuration. — Evidence: `.gitignore` excludes `config.yaml` (Documented; confidence: High)
 2. Prefer hot-reloadable config/auth flows over restart-only logic. The service and watcher design already support incremental auth updates and config reloads. — Evidence: `docs/sdk-watcher.md`, `sdk/cliproxy/service.go`, `sdk/cliproxy/watcher.go`, `internal/watcher/` (Documented; confidence: Medium)
 3. Persist repeatable repository rules in `.osc/spec/` and keep task-specific change plans in `.osc/tasks/<task-dir>/changes/`, not in chat alone. — Evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.osc/spec/README.md` (Documented; confidence: High)
 4. For non-exempt code changes, create/select a task first and write `proposal.md`, `spec.md`, and `tasks.md` before touching source files. `.osc/` files are the safe place to start. — Evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.osc/scripts/task.sh` (Documented; confidence: High)
