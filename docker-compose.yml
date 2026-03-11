@@ -6,7 +6,7 @@ services:
       args:
         VERSION: ${VERSION:-dev}
         COMMIT: ${COMMIT:-none}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-}
         GOPROXY: ${GOPROXY:-https://goproxy.cn|direct}
         GOSUMDB: ${GOSUMDB:-sum.golang.google.cn}
     container_name: cli-proxy-api

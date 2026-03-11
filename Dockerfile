@@ -4,10 +4,10 @@ WORKDIR /app
 
 COPY go.mod go.sum ./
 
-ARG GOPROXY=https://goproxy.cn|direct
-ARG GOSUMDB=sum.golang.google.cn
-ENV GOPROXY=${GOPROXY}
-ENV GOSUMDB=${GOSUMDB}
+ARG GOPROXY="https://goproxy.cn|direct"
+ARG GOSUMDB="sum.golang.google.cn"
+ENV GOPROXY="${GOPROXY}"
+ENV GOSUMDB="${GOSUMDB}"
 
 RUN go mod download
 
@@ -15,9 +15,9 @@ COPY . .
 
 ARG VERSION=dev
 ARG COMMIT=none
-ARG BUILD_DATE=unknown
-
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o ./CLIProxyAPI ./cmd/server/
+ARG BUILD_DATE=
+RUN if [ -z "$BUILD_DATE" ]; then BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ); fi && \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o ./CLIProxyAPI ./cmd/server/
 
 FROM alpine:3.22.0
 
