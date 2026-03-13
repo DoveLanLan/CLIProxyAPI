@@ -32,9 +32,15 @@
   - Change: explain how official Codex Team accounts should be added through the built-in Codex login flow rather than through API-key config
   - Verify: user has concrete commands and auth-file location guidance
 
+- [x] 5) Fix Docker-to-host routing for the local Claude upstream
+  - Target: `docker-compose.yml`, `config.yaml`
+  - Change: add a `host.docker.internal` host-gateway mapping for `cli-proxy-api` and point the `claude-local` base URL at `http://host.docker.internal:8990`
+  - Verify: recreate `cli-proxy-api`, then confirm `http://host.docker.internal:8990/v1/messages` is reachable from inside the container
+
 ## Notes
 
 - Discovered runtime issue: base `docker-compose.yml` publishes several host ports and failed on `0.0.0.0:8085` because that port is already allocated locally.
 - Mitigation used: added `docker-compose.local.yml` with a `!override` `ports` section that only publishes `8317`.
 - For container networking, the user-supplied Claude endpoint `http://127.0.0.1:8990` was translated to `http://host.docker.internal:8990` in `config.yaml`; inside Docker, `127.0.0.1` would have pointed at the container itself.
+- Follow-up issue on 2026-03-13: the live `config.yaml` had regressed to `http://localhost:8990`, and the compose service was still missing the host-gateway alias, so the container could not reach the host-published upstream until both settings were restored together.
 - Added an additional Claude-compatible provider for SiliconFlow with prefix `claude-sf` and explicit model alias `minimax-m2.5`, verified through `/v1/models`.

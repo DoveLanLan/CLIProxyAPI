@@ -9,12 +9,16 @@
 - Container startup: `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
 - Runtime status: `docker compose -f docker-compose.yml -f docker-compose.local.yml ps`
 - Root endpoint health: `curl http://127.0.0.1:8317/`
+- Docker host alias resolution: `docker exec cli-proxy-api getent hosts host.docker.internal`
+- Host-local Claude upstream reachability: `docker exec cli-proxy-api wget -S -O - --header="content-type: application/json" --post-data="{}" -T 3 http://host.docker.internal:8990/v1/messages`
 - Model registration sanity: `curl -H 'Authorization: Bearer <local-proxy-key>' http://127.0.0.1:8317/v1/models`
 - Build gate from repo CI: not run for this change set because no tracked runtime source code was modified
 
 ## Manual checks (if applicable)
 
 - Verify the root endpoint returns the CLI Proxy API server banner.
+- Verify `host.docker.internal` resolves inside `cli-proxy-api` after the container is recreated.
+- Verify the host-local Claude endpoint returns an upstream HTTP status (for example `401`) instead of `Connection refused`.
 - Verify `/v1/models` includes prefixed models for `nih`, `linuxdo`, `claude-local`, `claude-fc`, and `claude-sf`.
 - Verify requests to prefixed models use the intended upstream instead of ambiguous unprefixed routing.
 - Verify `claude-sf/minimax-m2.5` is listed after config reload or restart.

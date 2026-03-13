@@ -9,5 +9,5 @@
   "current_phase": 0,
   "next_action": [],
   "requires_change_workflow": true,
-  "change_workflow_status": "pending"
+  "change_workflow_status": "ready"
 }

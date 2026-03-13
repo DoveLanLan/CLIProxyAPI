@@ -13,11 +13,16 @@
   - three custom `claude-api-key` providers for the supplied Claude-compatible upstreams, including SiliconFlow
 - Queried upstream model listings for the OpenAI-style providers and wrote model aliases into the runtime config so those providers are immediately usable.
 - Added a local `docker-compose.local.yml` override that replaces the base compose port list with only `8317`, because host port `8085` was already occupied on this machine.
+- Updated the tracked `docker-compose.yml` service definition to map `host.docker.internal` to Docker's `host-gateway` for `cli-proxy-api`.
+- Corrected the live `config.yaml` so the `claude-local` upstream now points to `http://host.docker.internal:8990` instead of `http://localhost:8990`.
 - Started the service with Docker Compose and verified both the root endpoint and `/v1/models`.
+- Recreated `cli-proxy-api` and verified the container can now reach `http://host.docker.internal:8990/v1/messages`, which returns an upstream HTTP response instead of a connection failure.
 
 ## Why
 
 The user asked for a working local runtime configuration and a compose-based startup flow using supplied custom provider credentials, plus guidance for official Codex Team account setup. The implemented configuration keeps custom API-key providers separate from official OAuth-backed Codex Team accounts and makes the service usable immediately on the local machine.
+
+This follow-up specifically fixes the Docker networking mismatch where `localhost:8990` inside the proxy container incorrectly pointed back to the container itself rather than to the host-published upstream service.
 
 ## Notable decisions
 

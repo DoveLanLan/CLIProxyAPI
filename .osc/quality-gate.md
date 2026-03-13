@@ -1,64 +1,71 @@
 # Quality Gate Report
 
-- Date: 2026-03-09T09:24:49Z
+- Date: 2026-03-13
 
 **Assumptions:**
-- This change set is a local runtime configuration change, not a tracked source-code feature change.
-- Docker and Docker Compose are available on this workstation.
-- The supplied upstream credentials are intended for immediate local use.
+- This change set is limited to Docker/runtime configuration for host reachability, plus the required `.osc` task artifacts.
+- The target upstream service on port `8990` is intentionally exposed on the Docker host and should remain there.
+- No Go runtime source files were modified in this turn.
 
 **Suspected Change Scope:**
+- `docker-compose.yml`
 - `config.yaml`
-- `docker-compose.local.yml`
-- Local Docker runtime
 - `.osc/tasks/03-09-configure-custom-providers-docker/changes/`
 
 **Detected Gates:**
 - Gate Name: PR build compile check
   - Confidence: High
-  - Evidence: `.github/workflows/pr-test-build.yml` (`go build -o test-output ./cmd/server`)
-- Gate Name: Compose runtime validation
-  - Confidence: High
-  - Evidence: `docker-compose.yml` (runtime entrypoint and bind mounts), local workflow requirement from user request
+  - Evidence: `.github/workflows/pr-test-build.yml` runs `go build -o test-output ./cmd/server`
 - Gate Name: Translator path protection
   - Confidence: High
-  - Evidence: `.github/workflows/pr-path-guard.yml` (`internal/translator/**` blocked in PRs)
+  - Evidence: `.github/workflows/pr-path-guard.yml` blocks `internal/translator/**`
+- Gate Name: Compose runtime validation
+  - Confidence: High
+  - Evidence: `docker-compose.yml` defines the runnable service and bind-mounted runtime config
+- Gate Name: Local runtime health validation
+  - Confidence: Medium
+  - Evidence: user request is specifically about container-to-container/host reachability for `config.yaml` `base-url`
 
 **Suggested Gate Run (Local):**
-- `docker compose -f docker-compose.yml -f docker-compose.local.yml config`
-  - Result: passed
-  - Why: validates the compose graph after introducing the local override
-- `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
-  - Result: passed after replacing the base `ports` list with a local override
-  - Why: requested runtime startup path
-- `docker compose -f docker-compose.yml -f docker-compose.local.yml ps`
-  - Result: passed
-  - Why: confirms the container is running
+- `docker compose config`
+  - Why: verify the compose graph remains valid after adding `extra_hosts`
+  - Evidence: `docker-compose.yml`
+- `docker compose up -d --force-recreate cli-proxy-api`
+  - Why: apply the host-gateway mapping and refreshed runtime config to the live container
+  - Evidence: `docker-compose.yml`, `config.yaml`
+- `docker compose ps cli-proxy-api`
+  - Why: confirm the recreated service is healthy
+  - Evidence: `docker-compose.yml`
+- `docker exec cli-proxy-api getent hosts host.docker.internal`
+  - Why: validate the new host alias resolves inside the container
+  - Evidence: `docker-compose.yml`
+- `docker exec cli-proxy-api wget -S -O - --header="content-type: application/json" --post-data="{}" -T 3 http://host.docker.internal:8990/v1/messages`
+  - Why: validate the configured Claude-compatible upstream is reachable from the container
+  - Evidence: `config.yaml`
 - `curl http://127.0.0.1:8317/`
-  - Result: passed
-  - Why: confirms the service is responding
-- `curl -H 'Authorization: Bearer <local-proxy-key>' http://127.0.0.1:8317/v1/models`
-  - Result: passed
-  - Why: confirms configured providers registered model entries, including the later-added `claude-sf/minimax-m2.5`
+  - Why: confirm the proxy still responds after the container recreation
+  - Evidence: `docker-compose.yml`
 - `go build -o test-output ./cmd/server`
-  - Result: not run
-  - Reason: no tracked runtime source files changed; this was a local config/compose setup task
+  - Why: repo CI compile gate for tracked code changes
+  - Evidence: `.github/workflows/pr-test-build.yml`
+  - Note: skipped in this turn because no Go source files changed
 
 **Final Self-Review:**
-- Security & secrets: upstream secrets were written only to local `config.yaml`; they were not copied into tracked `.osc` artifacts.
-- Edge cases & error handling: handled the host-port collision by introducing a local compose override; handled Docker-localhost networking by converting `127.0.0.1:8990` to `host.docker.internal:8990` in the container config.
-- Backward compatibility / migrations: no schema, migration, or tracked source behavior change.
-- API/contract compatibility: no server code was modified; runtime config uses repo-supported provider sections.
-- Observability: container logs were checked after startup.
-- Config/env changes: added local runtime files only; base repo config example remains unchanged.
-- Performance risk: negligible for this change set.
-- Rollback plan: stop the compose stack and remove `config.yaml` / `docker-compose.local.yml`; remove `auths/` only if OAuth/device-login state should also be discarded.
+- Security & secrets: secrets remain only in local `config.yaml`; no credentials were added to tracked `.osc` files.
+- Edge cases & error handling: the fix handles the Linux Docker case where `host.docker.internal` is absent by explicitly mapping `host-gateway`.
+- Backward compatibility / migrations: no schema or API contract changes; only runtime routing for one configured upstream changed.
+- API/contract compatibility: upstream requests still use the same Claude-compatible `/v1/messages` endpoint; only address resolution changed.
+- Observability: root health and direct upstream reachability were both checked after recreation.
+- Config/env changes: `docker-compose.yml` now includes `extra_hosts`; `config.yaml` `claude-local.base-url` now uses `host.docker.internal`.
+- Performance risk: negligible; the change only affects DNS/host resolution for one upstream target.
+- Rollback plan: remove the `extra_hosts` entry and restore the old `claude-local` base URL if you need to revert.
 
 **PR-ready checklist:**
-- [x] `docker compose -f docker-compose.yml -f docker-compose.local.yml config`
-- [x] `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
-- [x] `docker compose -f docker-compose.yml -f docker-compose.local.yml ps`
+- [x] `docker compose config`
+- [x] `docker compose up -d --force-recreate cli-proxy-api`
+- [x] `docker compose ps cli-proxy-api`
+- [x] `docker exec cli-proxy-api getent hosts host.docker.internal`
+- [x] `docker exec cli-proxy-api wget -S -O - --header="content-type: application/json" --post-data="{}" -T 3 http://host.docker.internal:8990/v1/messages`
 - [x] `curl http://127.0.0.1:8317/`
-- [x] `curl -H 'Authorization: Bearer <local-proxy-key>' http://127.0.0.1:8317/v1/models`
 - [ ] `go build -o test-output ./cmd/server`
-  - Skipped intentionally because this turn changed only local runtime config and compose overrides, not tracked runtime source code.
+  - Skipped intentionally because this turn did not modify Go source files or build inputs beyond runtime/compose configuration.
