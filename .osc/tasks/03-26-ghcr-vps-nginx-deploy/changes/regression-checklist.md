@@ -17,9 +17,11 @@
 - Confirm Cloudflare `api.heweili.top` DNS record is proxied and `SSL/TLS` mode is `Full (strict)`.
 - Confirm `/opt/cliproxyapi/data/config.yaml`, `/opt/cliproxyapi/certs/origin.crt`, and `/opt/cliproxyapi/certs/origin.key` exist before the first deploy run.
 - Confirm `https://api.heweili.top/management.html` is not public after deployment.
+- Confirm `http://100.67.99.9:18317/management.html#/` is reachable from a device on the same tailnet after enabling remote management in `config.yaml`.
 
 ## Edge-case re-tests
 
 - Re-run the deploy workflow with the same image tag to confirm the remote deployment is idempotent.
 - Run a CLI streaming request through `https://api.heweili.top` and confirm long-lived responses are not buffered or cut off.
 - Confirm `/v1/ws` still upgrades correctly if WebSocket clients are used.
+- Confirm the Tailscale-bound management port does not conflict with existing Tailscale Serve/Funnel listeners on `443`.

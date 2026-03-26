@@ -14,7 +14,7 @@
   - server/bootstrap documentation
 - Replaced the old Docker Hub publishing workflow with a GHCR amd64 publishing workflow for the fork.
 - Added a new production deployment workflow that deploys the published image to `root@23.175.201.12:/opt/cliproxyapi` over SSH.
-- Kept management endpoints private in the first version by blocking `/management.html` and `/v0/management/` at Nginx.
+- Kept management endpoints off the public domain by blocking `/management.html` and `/v0/management/` at Nginx while exposing a dedicated Tailscale-only management port.
 
 ## Why
 
@@ -26,4 +26,4 @@ The upstream repository's release automation was aimed at tag-based public relea
 - Chose amd64-only image publication because the target VPS is `x86_64`; multi-arch can be added later if needed.
 - Chose a dedicated production Compose stack instead of modifying the root local/dev Compose file.
 - Chose Cloudflare Origin CA for the first HTTPS setup because the domain is already behind Cloudflare and the user wanted the simpler operational path.
-- Chose private-only management access, with Tailscale or SSH tunneling reserved for later admin access.
+- Chose split management access: public domain remains blocked, while a dedicated Tailscale-bound port supports private admin access.

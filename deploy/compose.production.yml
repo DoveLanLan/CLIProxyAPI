@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${TAILSCALE_BIND_IP:?set TAILSCALE_BIND_IP}:${TAILSCALE_MANAGEMENT_PORT:-18317}:8317"
     expose:
       - "8317"
     volumes:
@@ -21,8 +23,8 @@ services:
     depends_on:
       - cli-proxy-api
     ports:
-      - "80:80"
-      - "443:443"
+      - "${PUBLIC_BIND_IP:?set PUBLIC_BIND_IP}:80:80"
+      - "${PUBLIC_BIND_IP:?set PUBLIC_BIND_IP}:443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro

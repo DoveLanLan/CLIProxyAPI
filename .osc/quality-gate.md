@@ -49,6 +49,7 @@
 - Backward compatibility / migrations: root local/dev Compose flow remains intact; production deploy is isolated under `deploy/`.
 - API/contract compatibility: public API paths stay unchanged; only the ingress and delivery mechanism are added.
 - Config/env changes: new production stack expects `CLI_PROXY_IMAGE` and server-side runtime files under `/opt/cliproxyapi`.
+- Config/env changes: new production stack expects `PUBLIC_BIND_IP`, `TAILSCALE_BIND_IP`, and `TAILSCALE_MANAGEMENT_PORT` so public ingress and private management can coexist with Tailscale Serve on `443`.
 - Performance risk: low; Nginx is configured for streaming-friendly proxy behavior and WebSocket upgrades.
 - Rollback plan: redeploy an older GHCR image tag or revert the workflow / `deploy/` changes.
 

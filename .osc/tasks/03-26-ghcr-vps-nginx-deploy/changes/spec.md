@@ -49,7 +49,7 @@
 3. The repository contains a production deployment workflow that can SSH to the VPS, ensure the deployment directory exists, refresh deployment files, and run `docker compose pull` / `up -d`. (Verify: inspect workflow steps and remote deploy script/commands)
 4. The repository contains a production Compose definition that exposes only Nginx publicly while the app container remains internal to the Docker network. (Verify: inspect Compose `ports`, `expose`, and service definitions)
 5. The repository contains Nginx config for `api.heweili.top` that proxies the CLIProxyAPI service correctly for standard HTTP, streaming responses, and `/v1/ws`. (Verify: inspect Nginx config for `proxy_http_version`, buffering, and upgrade headers)
-6. Management UI/API routes are not exposed publicly by the first-version production proxy configuration. (Verify: inspect Nginx deny rules and deployment docs)
+6. Management UI/API routes are not exposed publicly by the production proxy configuration, but remain privately reachable over a dedicated Tailscale-bound port. (Verify: inspect Nginx deny rules, Compose port binding, and deployment docs)
 7. The deployment artifacts explicitly document Cloudflare-side setup for Origin CA and `Full (strict)` mode. (Verify: inspect deployment docs / env template / final notes)
 
 ## Behavior / Requirements
@@ -61,7 +61,7 @@
 - Nginx should preserve host/proto headers and support long-lived AI streaming responses without proxy buffering issues.
 - Production Compose should not publish callback helper ports such as `8085`, `1455`, `54545`, `51121`, or `11451` to the public host.
 - Production runtime state should live on the server under persistent paths for `config.yaml`, `auths/`, `logs/`, and certificate files.
-- The deployment design should assume management access is handled later via Tailscale or SSH tunneling rather than public internet exposure.
+- The deployment design should keep management off the public internet while allowing access over a dedicated Tailscale-bound host port and optional SSH tunnel fallback.
 
 ## Edge Cases
 
