@@ -1,71 +1,62 @@
 # Quality Gate Report
 
-- Date: 2026-03-13
+- Date: 2026-03-26
+- Task: `.osc/tasks/03-26-ghcr-vps-nginx-deploy`
 
 **Assumptions:**
-- This change set is limited to Docker/runtime configuration for host reachability, plus the required `.osc` task artifacts.
-- The target upstream service on port `8990` is intentionally exposed on the Docker host and should remain there.
-- No Go runtime source files were modified in this turn.
+- The production runtime secrets remain on the VPS and are intentionally absent from this repository.
+- The first production rollout uses Cloudflare Origin CA, not Let's Encrypt.
+- The deployment workflows are designed for the current fork and current VPS target only.
 
 **Suspected Change Scope:**
-- `docker-compose.yml`
-- `config.yaml`
-- `.osc/tasks/03-09-configure-custom-providers-docker/changes/`
+- `.github/workflows/docker-image.yml`
+- `.github/workflows/deploy-production.yml`
+- `deploy/`
+- `.osc/tasks/03-26-ghcr-vps-nginx-deploy/changes/`
 
 **Detected Gates:**
 - Gate Name: PR build compile check
   - Confidence: High
   - Evidence: `.github/workflows/pr-test-build.yml` runs `go build -o test-output ./cmd/server`
-- Gate Name: Translator path protection
-  - Confidence: High
-  - Evidence: `.github/workflows/pr-path-guard.yml` blocks `internal/translator/**`
-- Gate Name: Compose runtime validation
-  - Confidence: High
-  - Evidence: `docker-compose.yml` defines the runnable service and bind-mounted runtime config
-- Gate Name: Local runtime health validation
+- Gate Name: Workflow syntax sanity
   - Confidence: Medium
-  - Evidence: user request is specifically about container-to-container/host reachability for `config.yaml` `base-url`
+  - Evidence: tracked changes add GitHub Actions YAML that must remain parseable
+- Gate Name: Production Compose validation
+  - Confidence: High
+  - Evidence: `deploy/compose.production.yml` is the new runtime entrypoint for VPS deployment
+- Gate Name: Nginx reverse proxy validation
+  - Confidence: High
+  - Evidence: `deploy/nginx/conf.d/api.heweili.top.conf` defines the new public ingress path
+- Gate Name: Shell deploy script validation
+  - Confidence: High
+  - Evidence: `deploy/scripts/remote-deploy.sh` is executed remotely by the new workflow
 
-**Suggested Gate Run (Local):**
-- `docker compose config`
-  - Why: verify the compose graph remains valid after adding `extra_hosts`
-  - Evidence: `docker-compose.yml`
-- `docker compose up -d --force-recreate cli-proxy-api`
-  - Why: apply the host-gateway mapping and refreshed runtime config to the live container
-  - Evidence: `docker-compose.yml`, `config.yaml`
-- `docker compose ps cli-proxy-api`
-  - Why: confirm the recreated service is healthy
-  - Evidence: `docker-compose.yml`
-- `docker exec cli-proxy-api getent hosts host.docker.internal`
-  - Why: validate the new host alias resolves inside the container
-  - Evidence: `docker-compose.yml`
-- `docker exec cli-proxy-api wget -S -O - --header="content-type: application/json" --post-data="{}" -T 3 http://host.docker.internal:8990/v1/messages`
-  - Why: validate the configured Claude-compatible upstream is reachable from the container
-  - Evidence: `config.yaml`
-- `curl http://127.0.0.1:8317/`
-  - Why: confirm the proxy still responds after the container recreation
-  - Evidence: `docker-compose.yml`
-- `go build -o test-output ./cmd/server`
-  - Why: repo CI compile gate for tracked code changes
-  - Evidence: `.github/workflows/pr-test-build.yml`
-  - Note: skipped in this turn because no Go source files changed
+**Executed Gates (Local):**
+- `ruby -e 'require "yaml"; ...'`
+  - Result: passed for `.github/workflows/docker-image.yml`, `.github/workflows/deploy-production.yml`, and `deploy/compose.production.yml`
+- `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml config`
+  - Result: passed
+- `bash -n deploy/scripts/remote-deploy.sh`
+  - Result: passed
+- `go build -o /tmp/cli-proxy-api-check ./cmd/server`
+  - Result: passed
+- `docker run ... nginx:1.27-alpine nginx -t` on a temporary network with a `cli-proxy-api` alias
+  - Result: passed
 
 **Final Self-Review:**
-- Security & secrets: secrets remain only in local `config.yaml`; no credentials were added to tracked `.osc` files.
-- Edge cases & error handling: the fix handles the Linux Docker case where `host.docker.internal` is absent by explicitly mapping `host-gateway`.
-- Backward compatibility / migrations: no schema or API contract changes; only runtime routing for one configured upstream changed.
-- API/contract compatibility: upstream requests still use the same Claude-compatible `/v1/messages` endpoint; only address resolution changed.
-- Observability: root health and direct upstream reachability were both checked after recreation.
-- Config/env changes: `docker-compose.yml` now includes `extra_hosts`; `config.yaml` `claude-local.base-url` now uses `host.docker.internal`.
-- Performance risk: negligible; the change only affects DNS/host resolution for one upstream target.
-- Rollback plan: remove the `extra_hosts` entry and restore the old `claude-local` base URL if you need to revert.
+- Security & secrets: no live production secrets were committed; workflows expect SSH material through GitHub environment secrets.
+- Edge cases & error handling: remote deploy fails fast if `config.yaml` or Origin CA files are missing on the VPS.
+- Backward compatibility / migrations: root local/dev Compose flow remains intact; production deploy is isolated under `deploy/`.
+- API/contract compatibility: public API paths stay unchanged; only the ingress and delivery mechanism are added.
+- Config/env changes: new production stack expects `CLI_PROXY_IMAGE` and server-side runtime files under `/opt/cliproxyapi`.
+- Performance risk: low; Nginx is configured for streaming-friendly proxy behavior and WebSocket upgrades.
+- Rollback plan: redeploy an older GHCR image tag or revert the workflow / `deploy/` changes.
 
 **PR-ready checklist:**
-- [x] `docker compose config`
-- [x] `docker compose up -d --force-recreate cli-proxy-api`
-- [x] `docker compose ps cli-proxy-api`
-- [x] `docker exec cli-proxy-api getent hosts host.docker.internal`
-- [x] `docker exec cli-proxy-api wget -S -O - --header="content-type: application/json" --post-data="{}" -T 3 http://host.docker.internal:8990/v1/messages`
-- [x] `curl http://127.0.0.1:8317/`
-- [ ] `go build -o test-output ./cmd/server`
-  - Skipped intentionally because this turn did not modify Go source files or build inputs beyond runtime/compose configuration.
+- [x] GitHub workflow YAML parses
+- [x] Production Compose expands successfully
+- [x] Remote deploy shell script passes `bash -n`
+- [x] Nginx config passes `nginx -t` in a simulated Docker network
+- [x] `go build ./cmd/server` still passes
+- [ ] Live GitHub Actions deploy to VPS
+  - Pending real environment secrets and the first server-side bootstrap (`config.yaml` + Origin CA files).

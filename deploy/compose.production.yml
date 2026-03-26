@@ -1,0 +1,34 @@
+services:
+  cli-proxy-api:
+    image: ${CLI_PROXY_IMAGE:?set CLI_PROXY_IMAGE}
+    container_name: cli-proxy-api
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    expose:
+      - "8317"
+    volumes:
+      - ./data/config.yaml:/CLIProxyAPI/config.yaml
+      - ./data/auths:/root/.cli-proxy-api
+      - ./data/logs:/CLIProxyAPI/logs
+    networks:
+      - proxy
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: cli-proxy-api-nginx
+    restart: unless-stopped
+    depends_on:
+      - cli-proxy-api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    name: cli-proxy-api-proxy

@@ -1,0 +1,13 @@
+{
+  "name": "Set up GHCR GitHub Actions deployment to HK VPS with nginx and Cloudflare Origin CA",
+  "type": "feature",
+  "branch": "task/ghcr-vps-nginx-deploy",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [],
+  "status": "planned",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "pending"
+}
