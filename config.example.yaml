@@ -63,6 +63,8 @@ error-logs-max-files: 10
 usage-statistics-enabled: false
 
 # Proxy URL. Supports socks5/http/https protocols. Example: socks5://user:pass@192.168.1.1:1080/
+# For mixed local + remote routing in Docker, you can point this at a local split proxy
+# such as http://split-proxy:3128 and let that proxy bypass local Docker services.
 proxy-url: ""
 
 # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).

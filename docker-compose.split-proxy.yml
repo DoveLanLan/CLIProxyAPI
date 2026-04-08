@@ -1,0 +1,31 @@
+services:
+  cli-proxy-api:
+    depends_on:
+      - split-proxy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  split-proxy:
+    image: ubuntu/squid:5.2-22.04_beta
+    container_name: cli-proxy-split-proxy
+    restart: unless-stopped
+    environment:
+      UPSTREAM_PROXY_HOST: ${UPSTREAM_PROXY_HOST:?set UPSTREAM_PROXY_HOST}
+      UPSTREAM_PROXY_PORT: ${UPSTREAM_PROXY_PORT:?set UPSTREAM_PROXY_PORT}
+      # Optional Squid peer login in login=user:password format.
+      # Escape literal '%' as '%%' and spaces as '%20'.
+      UPSTREAM_PROXY_LOGIN: ${UPSTREAM_PROXY_LOGIN:-}
+      # Space-separated hostnames/domains that should bypass the upstream proxy.
+      DIRECT_DOMAINS: ${DIRECT_DOMAINS:-localhost host.docker.internal kirors-kiro}
+      # Space-separated CIDRs that should bypass the upstream proxy.
+      DIRECT_CIDRS: ${DIRECT_CIDRS:-127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 ::1/128 fc00::/7 fe80::/10}
+      SQUID_HTTP_PORT: ${SQUID_HTTP_PORT:-3128}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "${SQUID_HTTP_PORT:-3128}"
+    volumes:
+      - ./deploy/split-proxy/start.sh:/usr/local/bin/start-split-proxy.sh:ro
+    entrypoint:
+      - /bin/bash
+      - /usr/local/bin/start-split-proxy.sh

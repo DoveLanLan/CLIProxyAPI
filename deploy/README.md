@@ -2,6 +2,10 @@
 
 This directory contains the production deployment artifacts for the forked VPS deployment at `api.heweili.top`.
 
+Additional guide:
+
+- Chinese split-proxy setup: [SPLIT_PROXY_SETUP_CN.md](/root/Projects/Go/src/CLIProxyAPI/deploy/SPLIT_PROXY_SETUP_CN.md)
+
 ## Topology
 
 - Public traffic enters through Cloudflare.
@@ -18,12 +22,14 @@ Recommended root on the VPS:
 /opt/cliproxyapi/
   .env
   compose.production.yml
+  compose.production.split-proxy.yml
   nginx/conf.d/api.heweili.top.conf
   certs/origin.crt
   certs/origin.key
   data/config.yaml
   data/auths/
   data/logs/
+  split-proxy/start.sh
   scripts/remote-deploy.sh
 ```
 
@@ -38,11 +44,36 @@ The default production setup binds Nginx only to the VPS public IPv4 so it can c
    - `PUBLIC_BIND_IP` to the VPS public IPv4 that Cloudflare reaches
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
+   - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
+   - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` only when split-proxy is enabled
 3. Create `data/config.yaml` on the VPS.
 4. Create `data/auths/` and place any existing auth files there if needed.
 5. Ensure `data/logs/` exists and is writable.
 6. Place the Cloudflare Origin CA certificate at `certs/origin.crt`.
 7. Place the Cloudflare Origin CA private key at `certs/origin.key`.
+
+## Split Proxy Option
+
+If your global upstream proxy rejects `localhost`, Docker hostnames, or private subnets, keep those runtime secrets on the server in `/opt/cliproxyapi/.env` instead of GitHub Actions secrets.
+
+Example:
+
+```env
+ENABLE_SPLIT_PROXY=true
+UPSTREAM_PROXY_HOST=proxy.example.com
+UPSTREAM_PROXY_PORT=3128
+UPSTREAM_PROXY_LOGIN=your-user:your-password
+DIRECT_DOMAINS="localhost host.docker.internal kirors-kiro"
+```
+
+Then set the app config to use the local sidecar:
+
+```yaml
+proxy-url: "http://split-proxy:3128"
+```
+
+For a local Claude-compatible upstream, do not keep `http://localhost:8990` once split-proxy is enabled.
+Use `http://host.docker.internal:8990` or a shared-network service name instead.
 
 ## Cloudflare Steps
 
