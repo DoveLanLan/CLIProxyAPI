@@ -27,17 +27,14 @@ func (h *Handler) putStringList(c *gin.Context, set func([]string), after func()
 		}
 		arr = obj.Items
 	}
-	h.persistWith(c, func() {
-		set(arr)
-		if after != nil {
-			after()
-		}
-	})
+	set(arr)
+	if after != nil {
+		after()
+	}
+	h.persist(c)
 }
 
-// patchStringList takes a getter that returns the target slice from the current h.cfg.
-// The getter is called inside h.mu so it always reflects the live config pointer.
-func (h *Handler) patchStringList(c *gin.Context, get func() *[]string, after func()) {
+func (h *Handler) patchStringList(c *gin.Context, target *[]string, after func()) {
 	var body struct {
 		Old   *string `json:"old"`
 		New   *string `json:"new"`
@@ -48,75 +45,60 @@ func (h *Handler) patchStringList(c *gin.Context, get func() *[]string, after fu
 		c.JSON(400, gin.H{"error": "invalid body"})
 		return
 	}
-	if body.Index != nil && body.Value != nil {
-		idx, val := *body.Index, *body.Value
-		h.persistWith(c, func() {
-			target := get()
-			if idx >= 0 && idx < len(*target) {
-				(*target)[idx] = val
-				if after != nil {
-					after()
-				}
-			}
-		})
+	if body.Index != nil && body.Value != nil && *body.Index >= 0 && *body.Index < len(*target) {
+		(*target)[*body.Index] = *body.Value
+		if after != nil {
+			after()
+		}
+		h.persist(c)
 		return
 	}
 	if body.Old != nil && body.New != nil {
-		old, newVal := *body.Old, *body.New
-		h.persistWith(c, func() {
-			target := get()
-			for i := range *target {
-				if (*target)[i] == old {
-					(*target)[i] = newVal
-					if after != nil {
-						after()
-					}
-					return
+		for i := range *target {
+			if (*target)[i] == *body.Old {
+				(*target)[i] = *body.New
+				if after != nil {
+					after()
 				}
+				h.persist(c)
+				return
 			}
-			*target = append(*target, newVal)
-			if after != nil {
-				after()
-			}
-		})
+		}
+		*target = append(*target, *body.New)
+		if after != nil {
+			after()
+		}
+		h.persist(c)
 		return
 	}
 	c.JSON(400, gin.H{"error": "missing fields"})
 }
 
-// deleteFromStringList takes a getter that returns the target slice from the current h.cfg.
-// The getter is called inside h.mu so it always reflects the live config pointer.
-func (h *Handler) deleteFromStringList(c *gin.Context, get func() *[]string, after func()) {
+func (h *Handler) deleteFromStringList(c *gin.Context, target *[]string, after func()) {
 	if idxStr := c.Query("index"); idxStr != "" {
 		var idx int
 		_, err := fmt.Sscanf(idxStr, "%d", &idx)
-		if err == nil {
-			h.persistWith(c, func() {
-				target := get()
-				if idx >= 0 && idx < len(*target) {
-					*target = append((*target)[:idx], (*target)[idx+1:]...)
-					if after != nil {
-						after()
-					}
-				}
-			})
+		if err == nil && idx >= 0 && idx < len(*target) {
+			*target = append((*target)[:idx], (*target)[idx+1:]...)
+			if after != nil {
+				after()
+			}
+			h.persist(c)
 			return
 		}
 	}
 	if val := strings.TrimSpace(c.Query("value")); val != "" {
-		h.persistWith(c, func() {
-			target := get()
-			out := make([]string, 0, len(*target))
-			for _, v := range *target {
-				if strings.TrimSpace(v) != val {
-					out = append(out, v)
-				}
+		out := make([]string, 0, len(*target))
+		for _, v := range *target {
+			if strings.TrimSpace(v) != val {
+				out = append(out, v)
 			}
-			*target = out
-			if after != nil {
-				after()
-			}
-		})
+		}
+		*target = out
+		if after != nil {
+			after()
+		}
+		h.persist(c)
 		return
 	}
 	c.JSON(400, gin.H{"error": "missing index or value"})
@@ -130,10 +112,10 @@ func (h *Handler) PutAPIKeys(c *gin.Context) {
 	}, nil)
 }
 func (h *Handler) PatchAPIKeys(c *gin.Context) {
-	h.patchStringList(c, func() *[]string { return &h.cfg.APIKeys }, func() {})
+	h.patchStringList(c, &h.cfg.APIKeys, func() {})
 }
 func (h *Handler) DeleteAPIKeys(c *gin.Context) {
-	h.deleteFromStringList(c, func() *[]string { return &h.cfg.APIKeys }, func() {})
+	h.deleteFromStringList(c, &h.cfg.APIKeys, func() {})
 }
 
 // gemini-api-key: []GeminiKey
@@ -157,11 +139,9 @@ func (h *Handler) PutGeminiKeys(c *gin.Context) {
 		}
 		arr = obj.Items
 	}
-	copied := append([]config.GeminiKey(nil), arr...)
-	h.persistWith(c, func() {
-		h.cfg.GeminiKey = copied
-		h.cfg.SanitizeGeminiKeys()
-	})
+	h.cfg.GeminiKey = append([]config.GeminiKey(nil), arr...)
+	h.cfg.SanitizeGeminiKeys()
+	h.persist(c)
 }
 func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	type geminiKeyPatch struct {
@@ -205,11 +185,9 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	if body.Value.APIKey != nil {
 		trimmed := strings.TrimSpace(*body.Value.APIKey)
 		if trimmed == "" {
-			idx := targetIndex
-			h.persistWith(c, func() {
-				h.cfg.GeminiKey = append(h.cfg.GeminiKey[:idx], h.cfg.GeminiKey[idx+1:]...)
-				h.cfg.SanitizeGeminiKeys()
-			})
+			h.cfg.GeminiKey = append(h.cfg.GeminiKey[:targetIndex], h.cfg.GeminiKey[targetIndex+1:]...)
+			h.cfg.SanitizeGeminiKeys()
+			h.persist(c)
 			return
 		}
 		entry.APIKey = trimmed
@@ -229,11 +207,9 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	if body.Value.ExcludedModels != nil {
 		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
 	}
-	idx, e := targetIndex, entry
-	h.persistWith(c, func() {
-		h.cfg.GeminiKey[idx] = e
-		h.cfg.SanitizeGeminiKeys()
-	})
+	h.cfg.GeminiKey[targetIndex] = entry
+	h.cfg.SanitizeGeminiKeys()
+	h.persist(c)
 }
 
 func (h *Handler) DeleteGeminiKey(c *gin.Context) {
@@ -245,11 +221,9 @@ func (h *Handler) DeleteGeminiKey(c *gin.Context) {
 			}
 		}
 		if len(out) != len(h.cfg.GeminiKey) {
-			captured := out
-			h.persistWith(c, func() {
-				h.cfg.GeminiKey = captured
-				h.cfg.SanitizeGeminiKeys()
-			})
+			h.cfg.GeminiKey = out
+			h.cfg.SanitizeGeminiKeys()
+			h.persist(c)
 		} else {
 			c.JSON(404, gin.H{"error": "item not found"})
 		}
@@ -258,11 +232,9 @@ func (h *Handler) DeleteGeminiKey(c *gin.Context) {
 	if idxStr := c.Query("index"); idxStr != "" {
 		var idx int
 		if _, err := fmt.Sscanf(idxStr, "%d", &idx); err == nil && idx >= 0 && idx < len(h.cfg.GeminiKey) {
-			capturedIdx := idx
-			h.persistWith(c, func() {
-				h.cfg.GeminiKey = append(h.cfg.GeminiKey[:capturedIdx], h.cfg.GeminiKey[capturedIdx+1:]...)
-				h.cfg.SanitizeGeminiKeys()
-			})
+			h.cfg.GeminiKey = append(h.cfg.GeminiKey[:idx], h.cfg.GeminiKey[idx+1:]...)
+			h.cfg.SanitizeGeminiKeys()
+			h.persist(c)
 			return
 		}
 	}
@@ -293,11 +265,9 @@ func (h *Handler) PutClaudeKeys(c *gin.Context) {
 	for i := range arr {
 		normalizeClaudeKey(&arr[i])
 	}
-	copied := append([]config.ClaudeKey(nil), arr...)
-	h.persistWith(c, func() {
-		h.cfg.ClaudeKey = copied
-		h.cfg.SanitizeClaudeKeys()
-	})
+	h.cfg.ClaudeKey = arr
+	h.cfg.SanitizeClaudeKeys()
+	h.persist(c)
 }
 func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	type claudeKeyPatch struct {
@@ -359,11 +329,9 @@ func (h *Handler) PatchClaudeKey(c *gin.Context) {
 		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
 	}
 	normalizeClaudeKey(&entry)
-	idx, e := targetIndex, entry
-	h.persistWith(c, func() {
-		h.cfg.ClaudeKey[idx] = e
-		h.cfg.SanitizeClaudeKeys()
-	})
+	h.cfg.ClaudeKey[targetIndex] = entry
+	h.cfg.SanitizeClaudeKeys()
+	h.persist(c)
 }
 
 func (h *Handler) DeleteClaudeKey(c *gin.Context) {
@@ -374,22 +342,18 @@ func (h *Handler) DeleteClaudeKey(c *gin.Context) {
 				out = append(out, v)
 			}
 		}
-		captured := out
-		h.persistWith(c, func() {
-			h.cfg.ClaudeKey = captured
-			h.cfg.SanitizeClaudeKeys()
-		})
+		h.cfg.ClaudeKey = out
+		h.cfg.SanitizeClaudeKeys()
+		h.persist(c)
 		return
 	}
 	if idxStr := c.Query("index"); idxStr != "" {
 		var idx int
 		_, err := fmt.Sscanf(idxStr, "%d", &idx)
 		if err == nil && idx >= 0 && idx < len(h.cfg.ClaudeKey) {
-			capturedIdx := idx
-			h.persistWith(c, func() {
-				h.cfg.ClaudeKey = append(h.cfg.ClaudeKey[:capturedIdx], h.cfg.ClaudeKey[capturedIdx+1:]...)
-				h.cfg.SanitizeClaudeKeys()
-			})
+			h.cfg.ClaudeKey = append(h.cfg.ClaudeKey[:idx], h.cfg.ClaudeKey[idx+1:]...)
+			h.cfg.SanitizeClaudeKeys()
+			h.persist(c)
 			return
 		}
 	}
@@ -424,11 +388,9 @@ func (h *Handler) PutOpenAICompat(c *gin.Context) {
 			filtered = append(filtered, arr[i])
 		}
 	}
-	capturedFiltered := filtered
-	h.persistWith(c, func() {
-		h.cfg.OpenAICompatibility = capturedFiltered
-		h.cfg.SanitizeOpenAICompatibility()
-	})
+	h.cfg.OpenAICompatibility = filtered
+	h.cfg.SanitizeOpenAICompatibility()
+	h.persist(c)
 }
 func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	type openAICompatPatch struct {
@@ -476,11 +438,9 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	if body.Value.BaseURL != nil {
 		trimmed := strings.TrimSpace(*body.Value.BaseURL)
 		if trimmed == "" {
-			capturedIdx := targetIndex
-			h.persistWith(c, func() {
-				h.cfg.OpenAICompatibility = append(h.cfg.OpenAICompatibility[:capturedIdx], h.cfg.OpenAICompatibility[capturedIdx+1:]...)
-				h.cfg.SanitizeOpenAICompatibility()
-			})
+			h.cfg.OpenAICompatibility = append(h.cfg.OpenAICompatibility[:targetIndex], h.cfg.OpenAICompatibility[targetIndex+1:]...)
+			h.cfg.SanitizeOpenAICompatibility()
+			h.persist(c)
 			return
 		}
 		entry.BaseURL = trimmed
@@ -495,11 +455,9 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 		entry.Headers = config.NormalizeHeaders(*body.Value.Headers)
 	}
 	normalizeOpenAICompatibilityEntry(&entry)
-	capturedIdx, capturedEntry := targetIndex, entry
-	h.persistWith(c, func() {
-		h.cfg.OpenAICompatibility[capturedIdx] = capturedEntry
-		h.cfg.SanitizeOpenAICompatibility()
-	})
+	h.cfg.OpenAICompatibility[targetIndex] = entry
+	h.cfg.SanitizeOpenAICompatibility()
+	h.persist(c)
 }
 
 func (h *Handler) DeleteOpenAICompat(c *gin.Context) {
@@ -510,22 +468,18 @@ func (h *Handler) DeleteOpenAICompat(c *gin.Context) {
 				out = append(out, v)
 			}
 		}
-		captured := out
-		h.persistWith(c, func() {
-			h.cfg.OpenAICompatibility = captured
-			h.cfg.SanitizeOpenAICompatibility()
-		})
+		h.cfg.OpenAICompatibility = out
+		h.cfg.SanitizeOpenAICompatibility()
+		h.persist(c)
 		return
 	}
 	if idxStr := c.Query("index"); idxStr != "" {
 		var idx int
 		_, err := fmt.Sscanf(idxStr, "%d", &idx)
 		if err == nil && idx >= 0 && idx < len(h.cfg.OpenAICompatibility) {
-			capturedIdx := idx
-			h.persistWith(c, func() {
-				h.cfg.OpenAICompatibility = append(h.cfg.OpenAICompatibility[:capturedIdx], h.cfg.OpenAICompatibility[capturedIdx+1:]...)
-				h.cfg.SanitizeOpenAICompatibility()
-			})
+			h.cfg.OpenAICompatibility = append(h.cfg.OpenAICompatibility[:idx], h.cfg.OpenAICompatibility[idx+1:]...)
+			h.cfg.SanitizeOpenAICompatibility()
+			h.persist(c)
 			return
 		}
 	}
@@ -556,11 +510,9 @@ func (h *Handler) PutVertexCompatKeys(c *gin.Context) {
 	for i := range arr {
 		normalizeVertexCompatKey(&arr[i])
 	}
-	copied := append([]config.VertexCompatKey(nil), arr...)
-	h.persistWith(c, func() {
-		h.cfg.VertexCompatAPIKey = copied
-		h.cfg.SanitizeVertexCompatKeys()
-	})
+	h.cfg.VertexCompatAPIKey = arr
+	h.cfg.SanitizeVertexCompatKeys()
+	h.persist(c)
 }
 func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	type vertexCompatPatch struct {
@@ -605,11 +557,9 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	if body.Value.APIKey != nil {
 		trimmed := strings.TrimSpace(*body.Value.APIKey)
 		if trimmed == "" {
-			capturedIdx := targetIndex
-			h.persistWith(c, func() {
-				h.cfg.VertexCompatAPIKey = append(h.cfg.VertexCompatAPIKey[:capturedIdx], h.cfg.VertexCompatAPIKey[capturedIdx+1:]...)
-				h.cfg.SanitizeVertexCompatKeys()
-			})
+			h.cfg.VertexCompatAPIKey = append(h.cfg.VertexCompatAPIKey[:targetIndex], h.cfg.VertexCompatAPIKey[targetIndex+1:]...)
+			h.cfg.SanitizeVertexCompatKeys()
+			h.persist(c)
 			return
 		}
 		entry.APIKey = trimmed
@@ -620,11 +570,9 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	if body.Value.BaseURL != nil {
 		trimmed := strings.TrimSpace(*body.Value.BaseURL)
 		if trimmed == "" {
-			capturedIdx := targetIndex
-			h.persistWith(c, func() {
-				h.cfg.VertexCompatAPIKey = append(h.cfg.VertexCompatAPIKey[:capturedIdx], h.cfg.VertexCompatAPIKey[capturedIdx+1:]...)
-				h.cfg.SanitizeVertexCompatKeys()
-			})
+			h.cfg.VertexCompatAPIKey = append(h.cfg.VertexCompatAPIKey[:targetIndex], h.cfg.VertexCompatAPIKey[targetIndex+1:]...)
+			h.cfg.SanitizeVertexCompatKeys()
+			h.persist(c)
 			return
 		}
 		entry.BaseURL = trimmed
@@ -642,11 +590,9 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
 	}
 	normalizeVertexCompatKey(&entry)
-	capturedIdx, capturedEntry := targetIndex, entry
-	h.persistWith(c, func() {
-		h.cfg.VertexCompatAPIKey[capturedIdx] = capturedEntry
-		h.cfg.SanitizeVertexCompatKeys()
-	})
+	h.cfg.VertexCompatAPIKey[targetIndex] = entry
+	h.cfg.SanitizeVertexCompatKeys()
+	h.persist(c)
 }
 
 func (h *Handler) DeleteVertexCompatKey(c *gin.Context) {
@@ -657,22 +603,18 @@ func (h *Handler) DeleteVertexCompatKey(c *gin.Context) {
 				out = append(out, v)
 			}
 		}
-		captured := out
-		h.persistWith(c, func() {
-			h.cfg.VertexCompatAPIKey = captured
-			h.cfg.SanitizeVertexCompatKeys()
-		})
+		h.cfg.VertexCompatAPIKey = out
+		h.cfg.SanitizeVertexCompatKeys()
+		h.persist(c)
 		return
 	}
 	if idxStr := c.Query("index"); idxStr != "" {
 		var idx int
 		_, errScan := fmt.Sscanf(idxStr, "%d", &idx)
 		if errScan == nil && idx >= 0 && idx < len(h.cfg.VertexCompatAPIKey) {
-			capturedIdx := idx
-			h.persistWith(c, func() {
-				h.cfg.VertexCompatAPIKey = append(h.cfg.VertexCompatAPIKey[:capturedIdx], h.cfg.VertexCompatAPIKey[capturedIdx+1:]...)
-				h.cfg.SanitizeVertexCompatKeys()
-			})
+			h.cfg.VertexCompatAPIKey = append(h.cfg.VertexCompatAPIKey[:idx], h.cfg.VertexCompatAPIKey[idx+1:]...)
+			h.cfg.SanitizeVertexCompatKeys()
+			h.persist(c)
 			return
 		}
 	}
@@ -701,10 +643,8 @@ func (h *Handler) PutOAuthExcludedModels(c *gin.Context) {
 		}
 		entries = wrapper.Items
 	}
-	normalized := config.NormalizeOAuthExcludedModels(entries)
-	h.persistWith(c, func() {
-		h.cfg.OAuthExcludedModels = normalized
-	})
+	h.cfg.OAuthExcludedModels = config.NormalizeOAuthExcludedModels(entries)
+	h.persist(c)
 }
 
 func (h *Handler) PatchOAuthExcludedModels(c *gin.Context) {
@@ -721,8 +661,8 @@ func (h *Handler) PatchOAuthExcludedModels(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid provider"})
 		return
 	}
-	normalizedModels := config.NormalizeExcludedModels(body.Models)
-	if len(normalizedModels) == 0 {
+	normalized := config.NormalizeExcludedModels(body.Models)
+	if len(normalized) == 0 {
 		if h.cfg.OAuthExcludedModels == nil {
 			c.JSON(404, gin.H{"error": "provider not found"})
 			return
@@ -731,22 +671,18 @@ func (h *Handler) PatchOAuthExcludedModels(c *gin.Context) {
 			c.JSON(404, gin.H{"error": "provider not found"})
 			return
 		}
-		capturedProvider := provider
-		h.persistWith(c, func() {
-			delete(h.cfg.OAuthExcludedModels, capturedProvider)
-			if len(h.cfg.OAuthExcludedModels) == 0 {
-				h.cfg.OAuthExcludedModels = nil
-			}
-		})
+		delete(h.cfg.OAuthExcludedModels, provider)
+		if len(h.cfg.OAuthExcludedModels) == 0 {
+			h.cfg.OAuthExcludedModels = nil
+		}
+		h.persist(c)
 		return
 	}
-	capturedProvider, capturedModels := provider, normalizedModels
-	h.persistWith(c, func() {
-		if h.cfg.OAuthExcludedModels == nil {
-			h.cfg.OAuthExcludedModels = make(map[string][]string)
-		}
-		h.cfg.OAuthExcludedModels[capturedProvider] = capturedModels
-	})
+	if h.cfg.OAuthExcludedModels == nil {
+		h.cfg.OAuthExcludedModels = make(map[string][]string)
+	}
+	h.cfg.OAuthExcludedModels[provider] = normalized
+	h.persist(c)
 }
 
 func (h *Handler) DeleteOAuthExcludedModels(c *gin.Context) {
@@ -763,13 +699,11 @@ func (h *Handler) DeleteOAuthExcludedModels(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "provider not found"})
 		return
 	}
-	capturedProvider := provider
-	h.persistWith(c, func() {
-		delete(h.cfg.OAuthExcludedModels, capturedProvider)
-		if len(h.cfg.OAuthExcludedModels) == 0 {
-			h.cfg.OAuthExcludedModels = nil
-		}
-	})
+	delete(h.cfg.OAuthExcludedModels, provider)
+	if len(h.cfg.OAuthExcludedModels) == 0 {
+		h.cfg.OAuthExcludedModels = nil
+	}
+	h.persist(c)
 }
 
 // oauth-model-alias: map[string][]OAuthModelAlias
@@ -794,10 +728,8 @@ func (h *Handler) PutOAuthModelAlias(c *gin.Context) {
 		}
 		entries = wrapper.Items
 	}
-	sanitized := sanitizedOAuthModelAlias(entries)
-	h.persistWith(c, func() {
-		h.cfg.OAuthModelAlias = sanitized
-	})
+	h.cfg.OAuthModelAlias = sanitizedOAuthModelAlias(entries)
+	h.persist(c)
 }
 
 func (h *Handler) PatchOAuthModelAlias(c *gin.Context) {
@@ -823,8 +755,8 @@ func (h *Handler) PatchOAuthModelAlias(c *gin.Context) {
 	}
 
 	normalizedMap := sanitizedOAuthModelAlias(map[string][]config.OAuthModelAlias{channel: body.Aliases})
-	normalizedAliases := normalizedMap[channel]
-	if len(normalizedAliases) == 0 {
+	normalized := normalizedMap[channel]
+	if len(normalized) == 0 {
 		if h.cfg.OAuthModelAlias == nil {
 			c.JSON(404, gin.H{"error": "channel not found"})
 			return
@@ -833,22 +765,18 @@ func (h *Handler) PatchOAuthModelAlias(c *gin.Context) {
 			c.JSON(404, gin.H{"error": "channel not found"})
 			return
 		}
-		capturedChannel := channel
-		h.persistWith(c, func() {
-			delete(h.cfg.OAuthModelAlias, capturedChannel)
-			if len(h.cfg.OAuthModelAlias) == 0 {
-				h.cfg.OAuthModelAlias = nil
-			}
-		})
+		delete(h.cfg.OAuthModelAlias, channel)
+		if len(h.cfg.OAuthModelAlias) == 0 {
+			h.cfg.OAuthModelAlias = nil
+		}
+		h.persist(c)
 		return
 	}
-	capturedChannel, capturedAliases := channel, normalizedAliases
-	h.persistWith(c, func() {
-		if h.cfg.OAuthModelAlias == nil {
-			h.cfg.OAuthModelAlias = make(map[string][]config.OAuthModelAlias)
-		}
-		h.cfg.OAuthModelAlias[capturedChannel] = capturedAliases
-	})
+	if h.cfg.OAuthModelAlias == nil {
+		h.cfg.OAuthModelAlias = make(map[string][]config.OAuthModelAlias)
+	}
+	h.cfg.OAuthModelAlias[channel] = normalized
+	h.persist(c)
 }
 
 func (h *Handler) DeleteOAuthModelAlias(c *gin.Context) {
@@ -868,13 +796,11 @@ func (h *Handler) DeleteOAuthModelAlias(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "channel not found"})
 		return
 	}
-	capturedChannel := channel
-	h.persistWith(c, func() {
-		delete(h.cfg.OAuthModelAlias, capturedChannel)
-		if len(h.cfg.OAuthModelAlias) == 0 {
-			h.cfg.OAuthModelAlias = nil
-		}
-	})
+	delete(h.cfg.OAuthModelAlias, channel)
+	if len(h.cfg.OAuthModelAlias) == 0 {
+		h.cfg.OAuthModelAlias = nil
+	}
+	h.persist(c)
 }
 
 // codex-api-key: []CodexKey
@@ -908,11 +834,9 @@ func (h *Handler) PutCodexKeys(c *gin.Context) {
 		}
 		filtered = append(filtered, entry)
 	}
-	capturedFiltered := filtered
-	h.persistWith(c, func() {
-		h.cfg.CodexKey = capturedFiltered
-		h.cfg.SanitizeCodexKeys()
-	})
+	h.cfg.CodexKey = filtered
+	h.cfg.SanitizeCodexKeys()
+	h.persist(c)
 }
 func (h *Handler) PatchCodexKey(c *gin.Context) {
 	type codexKeyPatch struct {
@@ -961,11 +885,9 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 	if body.Value.BaseURL != nil {
 		trimmed := strings.TrimSpace(*body.Value.BaseURL)
 		if trimmed == "" {
-			capturedIdx := targetIndex
-			h.persistWith(c, func() {
-				h.cfg.CodexKey = append(h.cfg.CodexKey[:capturedIdx], h.cfg.CodexKey[capturedIdx+1:]...)
-				h.cfg.SanitizeCodexKeys()
-			})
+			h.cfg.CodexKey = append(h.cfg.CodexKey[:targetIndex], h.cfg.CodexKey[targetIndex+1:]...)
+			h.cfg.SanitizeCodexKeys()
+			h.persist(c)
 			return
 		}
 		entry.BaseURL = trimmed
@@ -983,11 +905,9 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
 	}
 	normalizeCodexKey(&entry)
-	capturedIdx, capturedEntry := targetIndex, entry
-	h.persistWith(c, func() {
-		h.cfg.CodexKey[capturedIdx] = capturedEntry
-		h.cfg.SanitizeCodexKeys()
-	})
+	h.cfg.CodexKey[targetIndex] = entry
+	h.cfg.SanitizeCodexKeys()
+	h.persist(c)
 }
 
 func (h *Handler) DeleteCodexKey(c *gin.Context) {
@@ -998,22 +918,18 @@ func (h *Handler) DeleteCodexKey(c *gin.Context) {
 				out = append(out, v)
 			}
 		}
-		captured := out
-		h.persistWith(c, func() {
-			h.cfg.CodexKey = captured
-			h.cfg.SanitizeCodexKeys()
-		})
+		h.cfg.CodexKey = out
+		h.cfg.SanitizeCodexKeys()
+		h.persist(c)
 		return
 	}
 	if idxStr := c.Query("index"); idxStr != "" {
 		var idx int
 		_, err := fmt.Sscanf(idxStr, "%d", &idx)
 		if err == nil && idx >= 0 && idx < len(h.cfg.CodexKey) {
-			capturedIdx := idx
-			h.persistWith(c, func() {
-				h.cfg.CodexKey = append(h.cfg.CodexKey[:capturedIdx], h.cfg.CodexKey[capturedIdx+1:]...)
-				h.cfg.SanitizeCodexKeys()
-			})
+			h.cfg.CodexKey = append(h.cfg.CodexKey[:idx], h.cfg.CodexKey[idx+1:]...)
+			h.cfg.SanitizeCodexKeys()
+			h.persist(c)
 			return
 		}
 	}
@@ -1177,7 +1093,8 @@ func (h *Handler) PutAmpUpstreamURL(c *gin.Context) {
 
 // DeleteAmpUpstreamURL clears the ampcode upstream URL.
 func (h *Handler) DeleteAmpUpstreamURL(c *gin.Context) {
-	h.persistWith(c, func() { h.cfg.AmpCode.UpstreamURL = "" })
+	h.cfg.AmpCode.UpstreamURL = ""
+	h.persist(c)
 }
 
 // GetAmpUpstreamAPIKey returns the ampcode upstream API key.
@@ -1196,7 +1113,8 @@ func (h *Handler) PutAmpUpstreamAPIKey(c *gin.Context) {
 
 // DeleteAmpUpstreamAPIKey clears the ampcode upstream API key.
 func (h *Handler) DeleteAmpUpstreamAPIKey(c *gin.Context) {
-	h.persistWith(c, func() { h.cfg.AmpCode.UpstreamAPIKey = "" })
+	h.cfg.AmpCode.UpstreamAPIKey = ""
+	h.persist(c)
 }
 
 // GetAmpRestrictManagementToLocalhost returns the localhost restriction setting.
@@ -1231,8 +1149,8 @@ func (h *Handler) PutAmpModelMappings(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid body"})
 		return
 	}
-	mappings := body.Value
-	h.persistWith(c, func() { h.cfg.AmpCode.ModelMappings = mappings })
+	h.cfg.AmpCode.ModelMappings = body.Value
+	h.persist(c)
 }
 
 // PatchAmpModelMappings adds or updates model mappings.
@@ -1245,22 +1163,21 @@ func (h *Handler) PatchAmpModelMappings(c *gin.Context) {
 		return
 	}
 
-	incoming := append([]config.AmpModelMapping(nil), body.Value...)
-	h.persistWith(c, func() {
-		existing := make(map[string]int)
-		for i, m := range h.cfg.AmpCode.ModelMappings {
-			existing[strings.TrimSpace(m.From)] = i
+	existing := make(map[string]int)
+	for i, m := range h.cfg.AmpCode.ModelMappings {
+		existing[strings.TrimSpace(m.From)] = i
+	}
+
+	for _, newMapping := range body.Value {
+		from := strings.TrimSpace(newMapping.From)
+		if idx, ok := existing[from]; ok {
+			h.cfg.AmpCode.ModelMappings[idx] = newMapping
+		} else {
+			h.cfg.AmpCode.ModelMappings = append(h.cfg.AmpCode.ModelMappings, newMapping)
+			existing[from] = len(h.cfg.AmpCode.ModelMappings) - 1
 		}
-		for _, newMapping := range incoming {
-			from := strings.TrimSpace(newMapping.From)
-			if idx, ok := existing[from]; ok {
-				h.cfg.AmpCode.ModelMappings[idx] = newMapping
-			} else {
-				h.cfg.AmpCode.ModelMappings = append(h.cfg.AmpCode.ModelMappings, newMapping)
-				existing[from] = len(h.cfg.AmpCode.ModelMappings) - 1
-			}
-		}
-	})
+	}
+	h.persist(c)
 }
 
 // DeleteAmpModelMappings removes specified model mappings by "from" field.
@@ -1269,7 +1186,8 @@ func (h *Handler) DeleteAmpModelMappings(c *gin.Context) {
 		Value []string `json:"value"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || len(body.Value) == 0 {
-		h.persistWith(c, func() { h.cfg.AmpCode.ModelMappings = nil })
+		h.cfg.AmpCode.ModelMappings = nil
+		h.persist(c)
 		return
 	}
 
@@ -1284,8 +1202,8 @@ func (h *Handler) DeleteAmpModelMappings(c *gin.Context) {
 			newMappings = append(newMappings, m)
 		}
 	}
-	capturedMappings := newMappings
-	h.persistWith(c, func() { h.cfg.AmpCode.ModelMappings = capturedMappings })
+	h.cfg.AmpCode.ModelMappings = newMappings
+	h.persist(c)
 }
 
 // GetAmpForceModelMappings returns whether model mappings are forced.
@@ -1322,7 +1240,8 @@ func (h *Handler) PutAmpUpstreamAPIKeys(c *gin.Context) {
 	}
 	// Normalize entries: trim whitespace, filter empty
 	normalized := normalizeAmpUpstreamAPIKeyEntries(body.Value)
-	h.persistWith(c, func() { h.cfg.AmpCode.UpstreamAPIKeys = normalized })
+	h.cfg.AmpCode.UpstreamAPIKeys = normalized
+	h.persist(c)
 }
 
 // PatchAmpUpstreamAPIKeys adds or updates upstream API keys entries.
@@ -1336,32 +1255,28 @@ func (h *Handler) PatchAmpUpstreamAPIKeys(c *gin.Context) {
 		return
 	}
 
-	incomingEntries := make([]config.AmpUpstreamAPIKeyEntry, 0, len(body.Value))
+	existing := make(map[string]int)
+	for i, entry := range h.cfg.AmpCode.UpstreamAPIKeys {
+		existing[strings.TrimSpace(entry.UpstreamAPIKey)] = i
+	}
+
 	for _, newEntry := range body.Value {
 		upstreamKey := strings.TrimSpace(newEntry.UpstreamAPIKey)
 		if upstreamKey == "" {
 			continue
 		}
-		incomingEntries = append(incomingEntries, config.AmpUpstreamAPIKeyEntry{
+		normalizedEntry := config.AmpUpstreamAPIKeyEntry{
 			UpstreamAPIKey: upstreamKey,
 			APIKeys:        normalizeAPIKeysList(newEntry.APIKeys),
-		})
+		}
+		if idx, ok := existing[upstreamKey]; ok {
+			h.cfg.AmpCode.UpstreamAPIKeys[idx] = normalizedEntry
+		} else {
+			h.cfg.AmpCode.UpstreamAPIKeys = append(h.cfg.AmpCode.UpstreamAPIKeys, normalizedEntry)
+			existing[upstreamKey] = len(h.cfg.AmpCode.UpstreamAPIKeys) - 1
+		}
 	}
-	h.persistWith(c, func() {
-		existing := make(map[string]int)
-		for i, entry := range h.cfg.AmpCode.UpstreamAPIKeys {
-			existing[strings.TrimSpace(entry.UpstreamAPIKey)] = i
-		}
-		for _, normalizedEntry := range incomingEntries {
-			upstreamKey := normalizedEntry.UpstreamAPIKey
-			if idx, ok := existing[upstreamKey]; ok {
-				h.cfg.AmpCode.UpstreamAPIKeys[idx] = normalizedEntry
-			} else {
-				h.cfg.AmpCode.UpstreamAPIKeys = append(h.cfg.AmpCode.UpstreamAPIKeys, normalizedEntry)
-				existing[upstreamKey] = len(h.cfg.AmpCode.UpstreamAPIKeys) - 1
-			}
-		}
-	})
+	h.persist(c)
 }
 
 // DeleteAmpUpstreamAPIKeys removes specified upstream API keys entries.
@@ -1384,7 +1299,8 @@ func (h *Handler) DeleteAmpUpstreamAPIKeys(c *gin.Context) {
 
 	// Empty array means clear all
 	if len(body.Value) == 0 {
-		h.persistWith(c, func() { h.cfg.AmpCode.UpstreamAPIKeys = nil })
+		h.cfg.AmpCode.UpstreamAPIKeys = nil
+		h.persist(c)
 		return
 	}
 
@@ -1407,8 +1323,8 @@ func (h *Handler) DeleteAmpUpstreamAPIKeys(c *gin.Context) {
 			newEntries = append(newEntries, entry)
 		}
 	}
-	capturedEntries := newEntries
-	h.persistWith(c, func() { h.cfg.AmpCode.UpstreamAPIKeys = capturedEntries })
+	h.cfg.AmpCode.UpstreamAPIKeys = newEntries
+	h.persist(c)
 }
 
 // normalizeAmpUpstreamAPIKeyEntries normalizes a list of upstream API key entries.
