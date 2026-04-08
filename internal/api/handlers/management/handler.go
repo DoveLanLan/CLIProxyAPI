@@ -105,7 +105,11 @@ func NewHandlerWithoutConfigFilePath(cfg *config.Config, manager *coreauth.Manag
 }
 
 // SetConfig updates the in-memory config reference when the server hot-reloads.
-func (h *Handler) SetConfig(cfg *config.Config) { h.cfg = cfg }
+func (h *Handler) SetConfig(cfg *config.Config) {
+	h.mu.Lock()
+	h.cfg = cfg
+	h.mu.Unlock()
+}
 
 // SetAuthManager updates the auth manager reference used by management endpoints.
 func (h *Handler) SetAuthManager(manager *coreauth.Manager) { h.authManager = manager }
@@ -272,18 +276,23 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 	}
 }
 
-// persist saves the current in-memory config to disk.
-func (h *Handler) persist(c *gin.Context) bool {
+// persistWith acquires h.mu, runs mutate (if non-nil), saves config to disk, then writes the HTTP response.
+// Grouping mutation and save under one lock prevents the file watcher from swapping h.cfg between them.
+func (h *Handler) persistWith(c *gin.Context, mutate func()) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	// Preserve comments when writing
-	if err := config.SaveConfigPreserveComments(h.configFilePath, h.cfg); err != nil {
+	if mutate != nil {
+		mutate()
+	}
+	err := config.SaveConfigPreserveComments(h.configFilePath, h.cfg)
+	h.mu.Unlock()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save config: %v", err)})
 		return false
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	return true
 }
+
 
 // Helper methods for simple types
 func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
@@ -294,8 +303,8 @@ func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	v := *body.Value
+	h.persistWith(c, func() { set(v) })
 }
 
 func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
@@ -306,8 +315,8 @@ func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	v := *body.Value
+	h.persistWith(c, func() { set(v) })
 }
 
 func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
@@ -318,6 +327,6 @@ func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	set(*body.Value)
-	h.persist(c)
+	v := *body.Value
+	h.persistWith(c, func() { set(v) })
 }

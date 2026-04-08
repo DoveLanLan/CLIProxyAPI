@@ -217,8 +217,7 @@ func (h *Handler) PutLogsMaxTotalSizeMB(c *gin.Context) {
 	if value < 0 {
 		value = 0
 	}
-	h.cfg.LogsMaxTotalSizeMB = value
-	h.persist(c)
+	h.persistWith(c, func() { h.cfg.LogsMaxTotalSizeMB = value })
 }
 
 // ErrorLogsMaxFiles
@@ -237,8 +236,7 @@ func (h *Handler) PutErrorLogsMaxFiles(c *gin.Context) {
 	if value < 0 {
 		value = 10
 	}
-	h.cfg.ErrorLogsMaxFiles = value
-	h.persist(c)
+	h.persistWith(c, func() { h.cfg.ErrorLogsMaxFiles = value })
 }
 
 // Request log
@@ -313,8 +311,7 @@ func (h *Handler) PutRoutingStrategy(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid strategy"})
 		return
 	}
-	h.cfg.Routing.Strategy = normalized
-	h.persist(c)
+	h.persistWith(c, func() { h.cfg.Routing.Strategy = normalized })
 }
 
 // Proxy URL
@@ -323,6 +320,5 @@ func (h *Handler) PutProxyURL(c *gin.Context) {
 	h.updateStringField(c, func(v string) { h.cfg.ProxyURL = v })
 }
 func (h *Handler) DeleteProxyURL(c *gin.Context) {
-	h.cfg.ProxyURL = ""
-	h.persist(c)
+	h.persistWith(c, func() { h.cfg.ProxyURL = "" })
 }
