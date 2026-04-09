@@ -29,6 +29,7 @@ Recommended root on the VPS:
   data/config.yaml
   data/auths/
   data/logs/
+  data/logs/split-proxy/
   split-proxy/start.sh
   scripts/remote-deploy.sh
 ```
@@ -49,6 +50,7 @@ The default production setup binds Nginx only to the VPS public IPv4 so it can c
 3. Create `data/config.yaml` on the VPS.
 4. Create `data/auths/` and place any existing auth files there if needed.
 5. Ensure `data/logs/` exists and is writable.
+   When split-proxy is enabled, `data/logs/split-proxy/` will be used for Squid logs.
 6. Place the Cloudflare Origin CA certificate at `certs/origin.crt`.
 7. Place the Cloudflare Origin CA private key at `certs/origin.key`.
 

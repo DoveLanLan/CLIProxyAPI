@@ -47,6 +47,22 @@ For local Claude-compatible services, prefer one of:
 docker compose -f docker-compose.yml -f docker-compose.split-proxy.yml up -d
 ```
 
+## Logs
+
+Squid logs are persisted inside the mounted log directory instead of writing directly to `/dev/stdout`:
+
+- local compose: `./logs/split-proxy/access.log`
+- local compose: `./logs/split-proxy/cache.log`
+- production deploy: `/opt/cliproxyapi/data/logs/split-proxy/access.log`
+- production deploy: `/opt/cliproxyapi/data/logs/split-proxy/cache.log`
+
+Inspect them with:
+
+```bash
+tail -f ./logs/split-proxy/access.log
+tail -f ./logs/split-proxy/cache.log
+```
+
 ## Optional bypass tuning
 
 Default direct-bypass hostnames:

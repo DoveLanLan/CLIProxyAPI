@@ -1,63 +1,62 @@
 # Quality Gate Report
 
-- Date: 2026-03-26
-- Task: `.osc/tasks/03-26-ghcr-vps-nginx-deploy`
+- Date: 2026-04-09
+- Task: `.osc/tasks/04-09-fix-split-proxy-squid-logging-startup`
 
 **Assumptions:**
-- The production runtime secrets remain on the VPS and are intentionally absent from this repository.
-- The first production rollout uses Cloudflare Origin CA, not Let's Encrypt.
-- The deployment workflows are designed for the current fork and current VPS target only.
+- The split-proxy startup failure is isolated to deploy-side Squid configuration and not to the main Go server runtime.
+- The production server continues to use the deploy assets under `/opt/cliproxyapi/` uploaded from `deploy/`.
+- The repo's minimum CI gate remains the compile step in `.github/workflows/pr-test-build.yml`.
 
 **Suspected Change Scope:**
-- `.github/workflows/docker-image.yml`
-- `.github/workflows/deploy-production.yml`
-- `deploy/`
-- `.osc/tasks/03-26-ghcr-vps-nginx-deploy/changes/`
+- `deploy/split-proxy/start.sh`
+- `deploy/compose.production.split-proxy.yml`
+- `docker-compose.split-proxy.yml`
+- `deploy/SPLIT_PROXY_SETUP_CN.md`
+- `deploy/split-proxy/README.md`
+- `deploy/README.md`
 
 **Detected Gates:**
 - Gate Name: PR build compile check
   - Confidence: High
   - Evidence: `.github/workflows/pr-test-build.yml` runs `go build -o test-output ./cmd/server`
-- Gate Name: Workflow syntax sanity
+- Gate Name: Split-proxy shell syntax validation
+  - Confidence: High
+  - Evidence: `deploy/split-proxy/start.sh` is the deployed entrypoint script for the Squid sidecar
+- Gate Name: Production compose rendering
+  - Confidence: High
+  - Evidence: `deploy/scripts/remote-deploy.sh` conditionally includes `deploy/compose.production.split-proxy.yml`
+- Gate Name: Local compose rendering
   - Confidence: Medium
-  - Evidence: tracked changes add GitHub Actions YAML that must remain parseable
-- Gate Name: Production Compose validation
-  - Confidence: High
-  - Evidence: `deploy/compose.production.yml` is the new runtime entrypoint for VPS deployment
-- Gate Name: Nginx reverse proxy validation
-  - Confidence: High
-  - Evidence: `deploy/nginx/conf.d/api.heweili.top.conf` defines the new public ingress path
-- Gate Name: Shell deploy script validation
-  - Confidence: High
-  - Evidence: `deploy/scripts/remote-deploy.sh` is executed remotely by the new workflow
+  - Evidence: `docker-compose.split-proxy.yml` is the repo-local split-proxy override for local/docker testing
+- Gate Name: Documentation/operator guidance review
+  - Confidence: Medium
+  - Evidence: `deploy/SPLIT_PROXY_SETUP_CN.md`, `deploy/split-proxy/README.md`, `deploy/README.md` define the operator workflow for this feature
 
 **Executed Gates (Local):**
-- `ruby -e 'require "yaml"; ...'`
-  - Result: passed for `.github/workflows/docker-image.yml`, `.github/workflows/deploy-production.yml`, and `deploy/compose.production.yml`
-- `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml config`
+- `bash -n deploy/split-proxy/start.sh`
   - Result: passed
-- `bash -n deploy/scripts/remote-deploy.sh`
+- `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml config >/tmp/cliproxy-prod-split-proxy-config.yaml`
+  - Result: passed
+- `UPSTREAM_PROXY_HOST=proxy.example.com UPSTREAM_PROXY_PORT=3128 docker compose -f docker-compose.yml -f docker-compose.split-proxy.yml config >/tmp/cliproxy-local-split-proxy-config.yaml`
   - Result: passed
 - `go build -o /tmp/cli-proxy-api-check ./cmd/server`
   - Result: passed
-- `docker run ... nginx:1.27-alpine nginx -t` on a temporary network with a `cli-proxy-api` alias
-  - Result: passed
 
 **Final Self-Review:**
-- Security & secrets: no live production secrets were committed; workflows expect SSH material through GitHub environment secrets.
-- Edge cases & error handling: remote deploy fails fast if `config.yaml` or Origin CA files are missing on the VPS.
-- Backward compatibility / migrations: root local/dev Compose flow remains intact; production deploy is isolated under `deploy/`.
-- API/contract compatibility: public API paths stay unchanged; only the ingress and delivery mechanism are added.
-- Config/env changes: new production stack expects `CLI_PROXY_IMAGE` and server-side runtime files under `/opt/cliproxyapi`.
-- Config/env changes: new production stack expects `PUBLIC_BIND_IP`, `TAILSCALE_BIND_IP`, and `TAILSCALE_MANAGEMENT_PORT` so public ingress and private management can coexist with Tailscale Serve on `443`.
-- Performance risk: low; Nginx is configured for streaming-friendly proxy behavior and WebSocket upgrades.
-- Rollback plan: redeploy an older GHCR image tag or revert the workflow / `deploy/` changes.
+- Security & secrets: no live proxy credentials or server secrets were committed; docs continue to direct operators to server-side `.env`.
+- Edge cases & error handling: the startup script now prepares/chowns both the Squid log and spool directories before launch.
+- Backward compatibility / migrations: existing split-proxy env vars and `proxy-url` usage remain unchanged; only log persistence behavior changes.
+- API/contract compatibility: no public API, SDK, or management contract changed.
+- Observability: split-proxy logs move to persisted files under the mounted log directory; docs were updated to reflect the new inspection path.
+- Config/env changes: no new env vars were introduced; new runtime expectation is the mounted `split-proxy` log directory under existing host logs.
+- Performance risk: low; writing Squid logs to regular files is a normal path and does not alter proxy routing.
+- Rollback plan: revert the deploy asset changes and redeploy; note that the original stdio logging crash would return on affected hosts.
 
 **PR-ready checklist:**
-- [x] GitHub workflow YAML parses
-- [x] Production Compose expands successfully
-- [x] Remote deploy shell script passes `bash -n`
-- [x] Nginx config passes `nginx -t` in a simulated Docker network
-- [x] `go build ./cmd/server` still passes
-- [ ] Live GitHub Actions deploy to VPS
-  - Pending real environment secrets and the first server-side bootstrap (`config.yaml` + Origin CA files).
+- [x] `bash -n deploy/split-proxy/start.sh`
+- [x] `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml config`
+- [x] `UPSTREAM_PROXY_HOST=proxy.example.com UPSTREAM_PROXY_PORT=3128 docker compose -f docker-compose.yml -f docker-compose.split-proxy.yml config`
+- [x] `go build -o /tmp/cli-proxy-api-check ./cmd/server`
+- [ ] Live redeploy to a server with `ENABLE_SPLIT_PROXY=true`
+  - Confirm `cli-proxy-split-proxy` stays up and that `data/logs/split-proxy/access.log` plus `cache.log` are created on the server.

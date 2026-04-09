@@ -1,0 +1,14 @@
+{
+  "name": "Fix split-proxy Squid logging startup failure",
+  "type": "bugfix",
+  "branch": "task/fix-split-proxy-squid-logging-startup",
+  "priority": "P2",
+  "description": "",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-04-09T02:28:33Z"
+}

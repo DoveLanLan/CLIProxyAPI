@@ -22,6 +22,7 @@ services:
       - "${SQUID_HTTP_PORT:-3128}"
     volumes:
       - ./split-proxy/start.sh:/usr/local/bin/start-split-proxy.sh:ro
+      - ./data/logs/split-proxy:/var/log/squid
     entrypoint:
       - /bin/bash
       - /usr/local/bin/start-split-proxy.sh

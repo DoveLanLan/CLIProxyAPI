@@ -39,6 +39,7 @@
   data/config.yaml
   data/auths/
   data/logs/
+  data/logs/split-proxy/
   scripts/remote-deploy.sh
 ```
 
@@ -174,7 +175,15 @@ docker compose -f compose.production.yml -f compose.production.split-proxy.yml p
 ```bash
 docker compose -f compose.production.yml -f compose.production.split-proxy.yml logs -f split-proxy
 docker compose -f compose.production.yml -f compose.production.split-proxy.yml logs -f cli-proxy-api
+tail -f /opt/cliproxyapi/data/logs/split-proxy/access.log
+tail -f /opt/cliproxyapi/data/logs/split-proxy/cache.log
 ```
+
+说明：
+
+- `cli-proxy-api` 仍然可以直接用 `docker compose logs -f cli-proxy-api`
+- `split-proxy` 的详细 Squid 日志现在持久化在 `/opt/cliproxyapi/data/logs/split-proxy/`
+- 这样可以避免 Squid 因为写 `/dev/stdout`、`/dev/stderr` 权限不足而反复重启
 
 ## 常见结论
 

@@ -7,10 +7,21 @@ set -euo pipefail
 direct_domains="${DIRECT_DOMAINS:-localhost host.docker.internal kirors-kiro}"
 direct_cidrs="${DIRECT_CIDRS:-127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 ::1/128 fc00::/7 fe80::/10}"
 squid_http_port="${SQUID_HTTP_PORT:-3128}"
+log_dir="/var/log/squid"
+spool_dir="/var/spool/squid"
+access_log_path="${log_dir}/access.log"
+cache_log_path="${log_dir}/cache.log"
 
 peer_login=""
 if [[ -n "${UPSTREAM_PROXY_LOGIN:-}" ]]; then
   peer_login=" login=${UPSTREAM_PROXY_LOGIN}"
+fi
+
+mkdir -p "${log_dir}" "${spool_dir}"
+touch "${access_log_path}" "${cache_log_path}"
+
+if id proxy >/dev/null 2>&1; then
+  chown -R proxy:proxy "${log_dir}" "${spool_dir}"
 fi
 
 cat >/etc/squid/squid.conf <<EOF
@@ -55,9 +66,9 @@ always_direct allow direct_dst
 never_direct allow all
 
 cache deny all
-access_log stdio:/dev/stdout
-cache_log stdio:/dev/stderr
-coredump_dir /var/spool/squid
+access_log stdio:${access_log_path}
+cache_log stdio:${cache_log_path}
+coredump_dir ${spool_dir}
 pid_filename none
 EOF
 
