@@ -60,6 +60,10 @@
   - Result: passed
 - 2026-04-21 remote public route sanity: `curl -I http://23.175.201.12 -H "Host: api.heweili.top"`.
   - Result: passed with HTTP `301` to `https://api.heweili.top/`
+- 2026-04-22 remote gateway validation after split-proxy network fix: `docker exec vps-gateway-nginx nginx -t`.
+  - Result: passed; nginx reported configuration syntax is OK and test is successful.
+- 2026-04-22 remote split-proxy DNS validation after split-proxy network fix: `docker exec cli-proxy-split-proxy getent hosts kiro-rs`.
+  - Result: passed; `kiro-rs` resolved to `172.18.0.4`.
 
 **Final Self-Review:**
 - Security & secrets: no live credentials were committed; runtime settings remain in server `.env`.
@@ -79,6 +83,6 @@
 - [x] `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml config`
 - [x] `UPSTREAM_PROXY_HOST=proxy.example.com UPSTREAM_PROXY_PORT=3128 docker compose -f docker-compose.yml -f docker-compose.split-proxy.yml config`
 - [x] `bash -n deploy/scripts/remote-deploy.sh`
-- [ ] remote `docker exec vps-gateway-nginx nginx -t` after the 2026-04-22 network fix is deployed
-- [ ] remote `docker exec cli-proxy-split-proxy getent hosts kiro-rs` after the 2026-04-22 network fix is deployed
-- [ ] GitHub Actions production workflow run after commit/push
+- [x] remote `docker exec vps-gateway-nginx nginx -t` after the 2026-04-22 network fix is deployed
+- [x] remote `docker exec cli-proxy-split-proxy getent hosts kiro-rs` after the 2026-04-22 network fix is deployed
+- [x] GitHub Actions production workflow run after commit/push

@@ -20,6 +20,11 @@
 - When split-proxy is enabled, confirm `docker network inspect cli-proxy-api-proxy` lists both `kiro-rs` and `cli-proxy-split-proxy`.
 - From the split-proxy container, confirm `getent hosts kiro-rs` resolves and TCP connectivity to `kiro-rs:8990` succeeds.
 
+## Verified remote checks
+
+- 2026-04-22: `docker exec vps-gateway-nginx nginx -t` passed; nginx reported configuration syntax is OK and test is successful.
+- 2026-04-22: `docker exec cli-proxy-split-proxy getent hosts kiro-rs` passed; `kiro-rs` resolved to `172.18.0.4`.
+
 ## Edge-case re-tests
 
 - Re-run deploy with `ENABLE_SPLIT_PROXY=true`; expected `cli-proxy-split-proxy` joins the shared network and remains running.
