@@ -1,0 +1,14 @@
+{
+  "name": "Move CLIProxyAPI production deploy to shared VPS gateway",
+  "type": "feature",
+  "branch": "task/shared-vps-gateway",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-04-21T06:52:42Z"
+}

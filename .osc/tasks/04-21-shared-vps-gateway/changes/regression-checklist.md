@@ -1,0 +1,24 @@
+# Regression Checklist: Move CLIProxyAPI Deploy to Shared VPS Gateway
+
+- Date: 2026-04-21
+- Related: spec.md, tasks.md
+
+## Gates (from Repo Snapshot)
+
+- Build: `go build -o test-output ./cmd/server`
+- Production compose: `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml config`
+- Production compose with split-proxy: `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml config`
+- Shell syntax: `bash -n deploy/scripts/remote-deploy.sh`
+
+## Manual checks
+
+- On VPS, run `docker ps` and confirm only `vps-gateway-nginx` binds public `80/443`.
+- On VPS, run `docker exec vps-gateway-nginx nginx -t`.
+- Check `http://23.175.201.12` with `Host: api.heweili.top`; expected HTTP `301` to `https://api.heweili.top/`.
+- Confirm Tailscale management binding remains `100.67.99.9:18317->8317`.
+
+## Edge-case re-tests
+
+- Re-run deploy with `ENABLE_SPLIT_PROXY=true`; expected `cli-proxy-split-proxy` joins the shared network and remains running.
+- Stop gateway container and run deploy; expected clear failure that gateway container is missing.
+- Remove gateway config dir and run deploy; expected clear failure that gateway config directory is missing.

@@ -583,7 +583,12 @@ func (h *Handler) UploadAuthFile(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "ok"})
 }
 
-// Delete auth files: single by name or all
+type deleteAuthFilesRequest struct {
+	Name  string   `json:"name"`
+	Names []string `json:"names"`
+}
+
+// Delete auth files: single by query/body name, multiple by body names, or all.
 func (h *Handler) DeleteAuthFile(c *gin.Context) {
 	if h.authManager == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
@@ -623,10 +628,58 @@ func (h *Handler) DeleteAuthFile(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "deleted": deleted})
 		return
 	}
-	name := c.Query("name")
-	if name == "" || strings.Contains(name, string(os.PathSeparator)) {
+
+	names := make([]string, 0, 1)
+	seenNames := make(map[string]struct{})
+	addName := func(raw string) {
+		name := strings.TrimSpace(raw)
+		if _, ok := seenNames[name]; ok {
+			return
+		}
+		seenNames[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	if name := c.Query("name"); strings.TrimSpace(name) != "" {
+		addName(name)
+	} else if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		var req deleteAuthFilesRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		if req.Name != "" {
+			addName(req.Name)
+		}
+		for _, name := range req.Names {
+			addName(name)
+		}
+	}
+
+	if len(names) == 0 {
 		c.JSON(400, gin.H{"error": "invalid name"})
 		return
+	}
+
+	deleted := 0
+	for _, name := range names {
+		if status, body := h.deleteAuthFileByName(ctx, name); status != 0 {
+			c.JSON(status, body)
+			return
+		}
+		deleted++
+	}
+
+	if len(names) > 1 {
+		c.JSON(200, gin.H{"status": "ok", "deleted": deleted})
+		return
+	}
+	c.JSON(200, gin.H{"status": "ok"})
+}
+
+func (h *Handler) deleteAuthFileByName(ctx context.Context, name string) (int, gin.H) {
+	if name == "" || strings.Contains(name, string(os.PathSeparator)) {
+		return 400, gin.H{"error": "invalid name"}
 	}
 
 	targetPath := filepath.Join(h.cfg.AuthDir, filepath.Base(name))
@@ -644,22 +697,19 @@ func (h *Handler) DeleteAuthFile(c *gin.Context) {
 	}
 	if errRemove := os.Remove(targetPath); errRemove != nil {
 		if os.IsNotExist(errRemove) {
-			c.JSON(404, gin.H{"error": "file not found"})
-		} else {
-			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to remove file: %v", errRemove)})
+			return 404, gin.H{"error": "file not found"}
 		}
-		return
+		return 500, gin.H{"error": fmt.Sprintf("failed to remove file: %v", errRemove)}
 	}
 	if errDeleteRecord := h.deleteTokenRecord(ctx, targetPath); errDeleteRecord != nil {
-		c.JSON(500, gin.H{"error": errDeleteRecord.Error()})
-		return
+		return 500, gin.H{"error": errDeleteRecord.Error()}
 	}
 	if targetID != "" {
 		h.disableAuth(ctx, targetID)
 	} else {
 		h.disableAuth(ctx, targetPath)
 	}
-	c.JSON(200, gin.H{"status": "ok"})
+	return 0, nil
 }
 
 func (h *Handler) findAuthForDelete(name string) *coreauth.Auth {

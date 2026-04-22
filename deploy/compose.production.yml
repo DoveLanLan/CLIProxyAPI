@@ -16,21 +16,7 @@ services:
     networks:
       - proxy
 
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: cli-proxy-api-nginx
-    restart: unless-stopped
-    depends_on:
-      - cli-proxy-api
-    ports:
-      - "${PUBLIC_BIND_IP:?set PUBLIC_BIND_IP}:80:80"
-      - "${PUBLIC_BIND_IP:?set PUBLIC_BIND_IP}:443:443"
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./certs:/etc/nginx/certs:ro
-    networks:
-      - proxy
-
 networks:
   proxy:
-    name: cli-proxy-api-proxy
+    external: true
+    name: ${GATEWAY_NETWORK:-vps-gateway}

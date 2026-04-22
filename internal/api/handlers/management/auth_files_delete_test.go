@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -125,5 +126,55 @@ func TestDeleteAuthFile_FallbackToAuthDirPath(t *testing.T) {
 	}
 	if _, errStat := os.Stat(filePath); !os.IsNotExist(errStat) {
 		t.Fatalf("expected auth file to be removed from auth dir, stat err: %v", errStat)
+	}
+}
+
+func TestDeleteAuthFile_JSONBodyNames(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+
+	authDir := t.TempDir()
+	fileNames := []string{
+		"codex-heweitest260407@outlook.com-free.json",
+		"codex-user@example.com-plus.json",
+	}
+	for _, fileName := range fileNames {
+		filePath := filepath.Join(authDir, fileName)
+		if errWrite := os.WriteFile(filePath, []byte(`{"type":"codex"}`), 0o600); errWrite != nil {
+			t.Fatalf("failed to write auth file %s: %v", fileName, errWrite)
+		}
+	}
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, manager)
+	h.tokenStore = &memoryAuthStore{}
+
+	body, errMarshal := json.Marshal(map[string][]string{"names": fileNames})
+	if errMarshal != nil {
+		t.Fatalf("failed to marshal request body: %v", errMarshal)
+	}
+
+	deleteRec := httptest.NewRecorder()
+	deleteCtx, _ := gin.CreateTestContext(deleteRec)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v0/management/auth-files", bytes.NewReader(body))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteCtx.Request = deleteReq
+	h.DeleteAuthFile(deleteCtx)
+
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected delete status %d, got %d with body %s", http.StatusOK, deleteRec.Code, deleteRec.Body.String())
+	}
+	var payload map[string]any
+	if errUnmarshal := json.Unmarshal(deleteRec.Body.Bytes(), &payload); errUnmarshal != nil {
+		t.Fatalf("failed to decode delete payload: %v", errUnmarshal)
+	}
+	if deleted, _ := payload["deleted"].(float64); deleted != float64(len(fileNames)) {
+		t.Fatalf("expected deleted count %d, got payload %#v", len(fileNames), payload)
+	}
+	for _, fileName := range fileNames {
+		filePath := filepath.Join(authDir, fileName)
+		if _, errStat := os.Stat(filePath); !os.IsNotExist(errStat) {
+			t.Fatalf("expected auth file %s to be removed, stat err: %v", fileName, errStat)
+		}
 	}
 }

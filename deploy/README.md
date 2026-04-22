@@ -9,8 +9,8 @@ Additional guide:
 ## Topology
 
 - Public traffic enters through Cloudflare.
-- Cloudflare connects to Nginx on the VPS.
-- Nginx proxies to the `cli-proxy-api` container on the internal Docker network.
+- Cloudflare connects to the shared `vps-gateway-nginx` container on the VPS.
+- The shared gateway proxies `api.heweili.top` to the `cli-proxy-api` container on the `vps-gateway` Docker network.
 - The management UI and `/v0/management` stay off the public domain.
 - Management access is exposed separately on the Tailscale IP and a dedicated host port.
 
@@ -23,9 +23,6 @@ Recommended root on the VPS:
   .env
   compose.production.yml
   compose.production.split-proxy.yml
-  nginx/conf.d/api.heweili.top.conf
-  certs/origin.crt
-  certs/origin.key
   data/config.yaml
   data/auths/
   data/logs/
@@ -35,14 +32,16 @@ Recommended root on the VPS:
 ```
 
 The deployment workflow will create the directory tree, but it will not create live runtime secrets for you.
-The default production setup binds Nginx only to the VPS public IPv4 so it can coexist with Tailscale Serve/Funnel listeners on the Tailscale IP.
+The shared gateway stack lives at `/opt/vps-gateway` and is the only container that should bind the VPS public `80/443` ports.
 
 ## One-Time Server Bootstrap
 
 1. Copy this `deploy/` directory to `/opt/cliproxyapi/`.
 2. Copy `.env.example` to `.env` if you want a local default image tag.
    Set:
-   - `PUBLIC_BIND_IP` to the VPS public IPv4 that Cloudflare reaches
+   - `GATEWAY_NETWORK` to the shared Docker network, usually `vps-gateway`
+   - `GATEWAY_ROOT` to the gateway stack root, usually `/opt/vps-gateway`
+   - `GATEWAY_CONTAINER` to the gateway nginx container, usually `vps-gateway-nginx`
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
@@ -51,8 +50,7 @@ The default production setup binds Nginx only to the VPS public IPv4 so it can c
 4. Create `data/auths/` and place any existing auth files there if needed.
 5. Ensure `data/logs/` exists and is writable.
    When split-proxy is enabled, `data/logs/split-proxy/` will be used for Squid logs.
-6. Place the Cloudflare Origin CA certificate at `certs/origin.crt`.
-7. Place the Cloudflare Origin CA private key at `certs/origin.key`.
+6. Ensure the shared gateway stack exists and mounts the certificate directory expected by `api.heweili.top.conf`.
 
 ## Split Proxy Option
 
@@ -83,7 +81,7 @@ Use `http://host.docker.internal:8990` or a shared-network service name instead.
 2. Keep the DNS record proxied (orange cloud enabled).
 3. In `SSL/TLS`, set mode to `Full (strict)`.
 4. In `SSL/TLS -> Origin Server`, generate an Origin CA certificate for `api.heweili.top`.
-5. Save the generated certificate and private key onto the VPS under `certs/`.
+5. Save the generated certificate and private key in the certificate directory mounted by the shared gateway as `/etc/nginx/certs/`.
 6. Optionally enable `Always Use HTTPS` in Cloudflare.
 
 ## Tailscale Management Access
@@ -124,6 +122,12 @@ Recommended production environment secrets:
 - `PRODUCTION_SSH_KNOWN_HOSTS`: output of `ssh-keyscan -H 23.175.201.12`
 
 No GHCR secret is required for image publication from Actions because the workflow can publish with `GITHUB_TOKEN` when it runs in this repository.
+
+## Shared Gateway Notes
+
+`CLIProxyAPI` no longer owns the public nginx container. Its deployment script installs `nginx/conf.d/api.heweili.top.conf` into `${GATEWAY_ROOT:-/opt/vps-gateway}/nginx/conf.d/` and reloads `${GATEWAY_CONTAINER:-vps-gateway-nginx}` after `nginx -t` passes.
+
+The shared gateway should be the only container binding public `80/443`. App stacks join `${GATEWAY_NETWORK:-vps-gateway}` and are reached by Docker service name.
 
 ## Management Access
 
