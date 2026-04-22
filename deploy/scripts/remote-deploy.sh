@@ -32,11 +32,20 @@ fi
 GATEWAY_NETWORK="${GATEWAY_NETWORK:-vps-gateway}"
 GATEWAY_ROOT="${GATEWAY_ROOT:-/opt/vps-gateway}"
 GATEWAY_CONTAINER="${GATEWAY_CONTAINER:-vps-gateway-nginx}"
+LOCAL_CLAUDE_NETWORK="${LOCAL_CLAUDE_NETWORK:-cli-proxy-api-proxy}"
 GATEWAY_CONF_DIR="$GATEWAY_ROOT/nginx/conf.d"
 
-export GATEWAY_NETWORK GATEWAY_ROOT GATEWAY_CONTAINER
+export GATEWAY_NETWORK GATEWAY_ROOT GATEWAY_CONTAINER LOCAL_CLAUDE_NETWORK
 
 docker network inspect "$GATEWAY_NETWORK" >/dev/null 2>&1 || docker network create "$GATEWAY_NETWORK" >/dev/null
+
+if [[ "${ENABLE_SPLIT_PROXY:-false}" == "true" ]]; then
+  if ! docker network inspect "$LOCAL_CLAUDE_NETWORK" >/dev/null 2>&1; then
+    echo "error: missing local Claude Docker network: $LOCAL_CLAUDE_NETWORK" >&2
+    echo "Create it or set LOCAL_CLAUDE_NETWORK to the network shared with your local Claude-compatible service." >&2
+    exit 1
+  fi
+fi
 
 cd "$ROOT_DIR"
 docker compose "${COMPOSE_ARGS[@]}" pull

@@ -22,8 +22,8 @@ This repository is not a conventional browser frontend project. The interactive 
 
 - Repo root: `/Volumes/DevDrive/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
-- Current task: `<none>`
-- Immediate implication: the next source-code task must start by creating or selecting a task before any non-`.osc/` edits are made.
+- Current task: `.osc/tasks/04-21-shared-vps-gateway`
+- Immediate implication: deployment changes should update that task's `changes/` artifacts before non-`.osc/` edits.
 
 **Repo Snapshot**
 - **Modules/Components:** `cmd/server` is the runnable server entrypoint; `internal/{api,auth,cmd,config,logging,managementasset,runtime,store,tui,usage,watcher,wsrelay,...}` contains server-only runtime code; `sdk/{api,auth,cliproxy,config,logging,translator}` is the reusable embedding surface; `docs/`, `examples/`, and `test/` hold consumer docs, samples, and regression coverage. (confidence: High) — evidence: `README.md`, `cmd/server/main.go`, `internal/`, `sdk/`, `docs/`, `examples/`, `test/`
@@ -94,6 +94,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 2. Prefer hot-reloadable config/auth flows over restart-only logic. The service and watcher design already support incremental auth updates and config reloads. — Evidence: `docs/sdk-watcher.md`, `sdk/cliproxy/service.go`, `sdk/cliproxy/watcher.go`, `internal/watcher/` (Documented; confidence: Medium)
 3. Persist repeatable repository rules in `.osc/spec/` and keep task-specific change plans in `.osc/tasks/<task-dir>/changes/`, not in chat alone. — Evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.osc/spec/README.md` (Documented; confidence: High)
 4. For non-exempt code changes, create/select a task first and write `proposal.md`, `spec.md`, and `tasks.md` before touching source files. `.osc/` files are the safe place to start. — Evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.osc/scripts/task.sh` (Documented; confidence: High)
+5. Production split-proxy deployments that route to Docker-local Claude-compatible services must keep the sidecar on both the shared gateway network and the upstream service network. — Evidence: `deploy/compose.production.split-proxy.yml`, `deploy/SPLIT_PROXY_SETUP_CN.md` (Documented; confidence: High)
 
 #### D) Testing strategy & coverage expectations
 1. Treat `go build -o test-output ./cmd/server` as the minimum must-pass pull-request gate, because that is the explicitly wired PR CI check. — Evidence: `.github/workflows/pr-test-build.yml` (Documented; confidence: High)
@@ -108,8 +109,8 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 ### Top 7 Constraints
 
-- Constraint 1: There is currently no selected `osc` task (`current_task: <none>`), so the first implementation step for any code change must be task creation or task selection.
-- Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
+- Constraint 1: Current source changes should stay within `.osc/tasks/04-21-shared-vps-gateway` unless a new task is selected.
+- Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist or are updated, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
 - Constraint 3: Required repo artifacts do not live only in chat: baseline rules go in `.osc/spec/project-spec.md`, task change packages go in `.osc/tasks/<task-dir>/changes/`, and quality results go in `.osc/quality-gate.md`.
 - Constraint 4: This repository is primarily a Go proxy/server and embeddable SDK, not a bundled browser frontend. UI work in-tree normally means Bubble Tea TUI work or management asset integration.
 - Constraint 5: `cmd/server` is the runnable entrypoint, and at minimum every pull request must keep `go build ./cmd/server` passing under Go `1.26`.

@@ -1,6 +1,6 @@
 # Quality Gate Report
 
-- Date: 2026-04-21
+- Date: 2026-04-22
 - Task: `.osc/tasks/04-21-shared-vps-gateway`
 
 **Assumptions:**
@@ -11,9 +11,14 @@
 **Suspected Change Scope:**
 - `deploy/compose.production.yml`
 - `deploy/.env.example`
+- `deploy/compose.production.split-proxy.yml`
 - `deploy/scripts/remote-deploy.sh`
 - `deploy/nginx/conf.d/api.heweili.top.conf`
 - `deploy/README.md`
+- `deploy/SPLIT_PROXY_SETUP_CN.md`
+- `deploy/split-proxy/start.sh`
+- `deploy/split-proxy/README.md`
+- `docker-compose.split-proxy.yml`
 - `.osc/tasks/04-21-shared-vps-gateway/changes/*`
 
 **Detected Gates:**
@@ -32,32 +37,39 @@
 - Gate Name: Gateway nginx validation
   - Confidence: Medium
   - Evidence: `deploy/scripts/remote-deploy.sh` runs `docker exec "$GATEWAY_CONTAINER" nginx -t`
+- Gate Name: Split-proxy local upstream network validation
+  - Confidence: High
+  - Evidence: `deploy/compose.production.split-proxy.yml`, `deploy/scripts/remote-deploy.sh`
 
 **Executed Gates:**
 - `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml config`
   - Result: passed
 - `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml config`
+  - Result: passed; rendered `split-proxy` on both `proxy` / `vps-gateway` and `local-claude` / `cli-proxy-api-proxy`.
+- `UPSTREAM_PROXY_HOST=proxy.example.com UPSTREAM_PROXY_PORT=3128 docker compose -f docker-compose.yml -f docker-compose.split-proxy.yml config`
   - Result: passed
 - `bash -n deploy/scripts/remote-deploy.sh`
   - Result: passed
-- YAML parse check for `deploy/compose.production.yml`, `deploy/compose.production.split-proxy.yml`, and `.github/workflows/deploy-production.yml`
-  - Result: passed
 - `go build -o test-output ./cmd/server`
   - Result: passed; generated `test-output` was removed after verification.
-- Remote sync and deploy on `bytevirt`: uploaded deploy assets to `/opt/cliproxyapi` and ran `CLI_PROXY_IMAGE=ghcr.io/dovelanlan/cliproxyapi:main bash scripts/remote-deploy.sh`
+
+**Previously Executed Remote Gates:**
+- 2026-04-21 remote sync and deploy on `bytevirt`: uploaded deploy assets to `/opt/cliproxyapi` and ran `CLI_PROXY_IMAGE=ghcr.io/dovelanlan/cliproxyapi:main bash scripts/remote-deploy.sh`.
   - Result: passed
-- Remote gateway validation: `docker exec vps-gateway-nginx nginx -t`
+- 2026-04-21 remote gateway validation: `docker exec vps-gateway-nginx nginx -t`.
   - Result: passed
-- Remote public route sanity: `curl -I http://23.175.201.12 -H "Host: api.heweili.top"`
+- 2026-04-21 remote public route sanity: `curl -I http://23.175.201.12 -H "Host: api.heweili.top"`.
   - Result: passed with HTTP `301` to `https://api.heweili.top/`
 
 **Final Self-Review:**
 - Security & secrets: no live credentials were committed; runtime settings remain in server `.env`.
 - Edge cases & error handling: deploy script fails clearly if gateway config dir or gateway container is missing.
+- Edge cases & error handling: deploy script fails clearly if split-proxy is enabled and `LOCAL_CLAUDE_NETWORK` is missing.
 - Backward compatibility / migrations: no app data or API behavior changes.
 - API/contract compatibility: public API and management route policy remain unchanged.
 - Observability: use GitHub Actions logs, Docker Compose output, nginx logs, and container logs.
 - Config/env changes: new optional `GATEWAY_NETWORK`, `GATEWAY_ROOT`, and `GATEWAY_CONTAINER` values are documented.
+- Config/env changes: `LOCAL_CLAUDE_NETWORK` is documented and defaults to `cli-proxy-api-proxy` for production split-proxy.
 - Performance risk: no runtime hot path change.
 - Rollback plan: documented in task rollback notes.
 
@@ -65,7 +77,8 @@
 - [x] `go build -o test-output ./cmd/server`
 - [x] `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml config`
 - [x] `docker compose --env-file deploy/.env.example -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml config`
+- [x] `UPSTREAM_PROXY_HOST=proxy.example.com UPSTREAM_PROXY_PORT=3128 docker compose -f docker-compose.yml -f docker-compose.split-proxy.yml config`
 - [x] `bash -n deploy/scripts/remote-deploy.sh`
-- [x] remote `docker exec vps-gateway-nginx nginx -t`
-- [x] remote `api.heweili.top` HTTP redirect sanity check
+- [ ] remote `docker exec vps-gateway-nginx nginx -t` after the 2026-04-22 network fix is deployed
+- [ ] remote `docker exec cli-proxy-split-proxy getent hosts kiro-rs` after the 2026-04-22 network fix is deployed
 - [ ] GitHub Actions production workflow run after commit/push

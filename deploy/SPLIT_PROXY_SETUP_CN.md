@@ -6,7 +6,7 @@
 
 - 全局上游代理可以访问公网
 - 但全局上游代理拒绝访问 `localhost`、`127.0.0.1`、Docker 服务名或私网 IP
-- 你希望 `CLIProxyAPI` 访问本地 `kirors-kiro` 之类的服务时不再经过外部代理
+- 你希望 `CLIProxyAPI` 访问本地 `kiro-rs` 之类的服务时不再经过外部代理
 
 ## 方案说明
 
@@ -66,13 +66,15 @@ ENABLE_SPLIT_PROXY=true
 UPSTREAM_PROXY_HOST=proxy.example.com
 UPSTREAM_PROXY_PORT=3128
 UPSTREAM_PROXY_LOGIN=your-user:your-password
-DIRECT_DOMAINS="localhost host.docker.internal kirors-kiro"
+LOCAL_CLAUDE_NETWORK=cli-proxy-api-proxy
+DIRECT_DOMAINS="localhost host.docker.internal kiro-rs kirors-kiro"
 ```
 
 说明：
 
 - `ENABLE_SPLIT_PROXY=true` 表示启用本地分流代理 sidecar
 - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` 是你的外部 HTTP 代理信息
+- `LOCAL_CLAUDE_NETWORK` 表示本地 Claude 兼容服务所在的 Docker 网络，例如 `kiro-rs` 当前所在的 `cli-proxy-api-proxy`
 - `DIRECT_DOMAINS` 表示这些目标不走外部代理，直接连接
 
 如果你想编辑：
@@ -96,7 +98,8 @@ ENABLE_SPLIT_PROXY=true
 UPSTREAM_PROXY_HOST=proxy.example.com
 UPSTREAM_PROXY_PORT=3128
 UPSTREAM_PROXY_LOGIN=your-user:your-password
-DIRECT_DOMAINS="localhost host.docker.internal kirors-kiro"
+LOCAL_CLAUDE_NETWORK=cli-proxy-api-proxy
+DIRECT_DOMAINS="localhost host.docker.internal kiro-rs kirors-kiro"
 EOF
 ```
 
@@ -127,10 +130,16 @@ proxy-url: "http://split-proxy:3128"
 base-url: "http://host.docker.internal:8990"
 ```
 
-如果你的 `kirors-kiro` 与 `split-proxy` 在同一个 Docker 网络里，也可以使用：
+如果你的 `kiro-rs` 与 `split-proxy` 在同一个 Docker 网络里，也可以使用：
 
 ```yaml
-base-url: "http://kirors-kiro:8990"
+base-url: "http://kiro-rs:8990"
+```
+
+使用 Docker 服务名时，`LOCAL_CLAUDE_NETWORK` 必须指向已经包含该服务的网络。当前生产默认是：
+
+```env
+LOCAL_CLAUDE_NETWORK=cli-proxy-api-proxy
 ```
 
 不要再使用：
@@ -202,4 +211,4 @@ tail -f /opt/cliproxyapi/data/logs/split-proxy/cache.log
 
 1. 服务器 `.env` 里开启 `ENABLE_SPLIT_PROXY=true`
 2. `data/config.yaml` 里把全局 `proxy-url` 改成 `http://split-proxy:3128`
-3. 本地 Claude 上游不要再写 `localhost:8990`，改成 `host.docker.internal:8990`
+3. 本地 Claude 上游不要再写 `localhost:8990`，改成 `host.docker.internal:8990` 或 `kiro-rs:8990`，并确保 `LOCAL_CLAUDE_NETWORK` 指向 `kiro-rs` 所在网络

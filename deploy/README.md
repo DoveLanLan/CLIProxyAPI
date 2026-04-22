@@ -40,6 +40,7 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
 2. Copy `.env.example` to `.env` if you want a local default image tag.
    Set:
    - `GATEWAY_NETWORK` to the shared Docker network, usually `vps-gateway`
+   - `LOCAL_CLAUDE_NETWORK` to the Docker network shared with local Claude-compatible services, usually `cli-proxy-api-proxy`
    - `GATEWAY_ROOT` to the gateway stack root, usually `/opt/vps-gateway`
    - `GATEWAY_CONTAINER` to the gateway nginx container, usually `vps-gateway-nginx`
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
@@ -60,10 +61,11 @@ Example:
 
 ```env
 ENABLE_SPLIT_PROXY=true
+LOCAL_CLAUDE_NETWORK=cli-proxy-api-proxy
 UPSTREAM_PROXY_HOST=proxy.example.com
 UPSTREAM_PROXY_PORT=3128
 UPSTREAM_PROXY_LOGIN=your-user:your-password
-DIRECT_DOMAINS="localhost host.docker.internal kirors-kiro"
+DIRECT_DOMAINS="localhost host.docker.internal kiro-rs kirors-kiro"
 ```
 
 Then set the app config to use the local sidecar:
@@ -74,6 +76,7 @@ proxy-url: "http://split-proxy:3128"
 
 For a local Claude-compatible upstream, do not keep `http://localhost:8990` once split-proxy is enabled.
 Use `http://host.docker.internal:8990` or a shared-network service name instead.
+If you use a Docker service name such as `http://kiro-rs:8990`, make sure `LOCAL_CLAUDE_NETWORK` points to the existing Docker network that contains that service. The production default is `cli-proxy-api-proxy`, and the deploy script fails early if that network is missing.
 
 ## Cloudflare Steps
 

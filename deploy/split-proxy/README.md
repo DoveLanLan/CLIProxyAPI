@@ -39,7 +39,7 @@ From Squid's point of view, `localhost` means the `split-proxy` container itself
 For local Claude-compatible services, prefer one of:
 
 - `http://host.docker.internal:8990` when the upstream is published on the Docker host
-- `http://kirors-kiro:8990` when the upstream container shares a Docker network with `split-proxy`
+- `http://kiro-rs:8990` when the upstream container shares a Docker network with `split-proxy`
 
 ## Start
 
@@ -69,6 +69,7 @@ Default direct-bypass hostnames:
 
 - `localhost`
 - `host.docker.internal`
+- `kiro-rs`
 - `kirors-kiro`
 
 Default direct-bypass CIDRs:
@@ -86,12 +87,12 @@ Default direct-bypass CIDRs:
 Override them if needed:
 
 ```bash
-export DIRECT_DOMAINS='localhost host.docker.internal kirors-kiro some.internal.domain'
+export DIRECT_DOMAINS='localhost host.docker.internal kiro-rs kirors-kiro some.internal.domain'
 export DIRECT_CIDRS='127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16'
 ```
 
 ## Notes
 
 - This override assumes your upstream proxy is an HTTP proxy. If your upstream is HTTPS or SOCKS5, adjust the Squid peer config first.
-- If `kirors-kiro` lives in a different compose project, `split-proxy` must be attached to a network where that name resolves. Otherwise use `host.docker.internal:8990`.
+- If `kiro-rs` lives in a different compose project, `split-proxy` must be attached to a network where that name resolves. Otherwise use `host.docker.internal:8990`.
 - `UPSTREAM_PROXY_LOGIN` uses Squid's `login=user:password` format. Escape literal `%` as `%%` and spaces as `%20`.

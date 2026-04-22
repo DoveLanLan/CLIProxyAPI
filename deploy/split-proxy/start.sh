@@ -4,7 +4,7 @@ set -euo pipefail
 : "${UPSTREAM_PROXY_HOST:?UPSTREAM_PROXY_HOST is required}"
 : "${UPSTREAM_PROXY_PORT:?UPSTREAM_PROXY_PORT is required}"
 
-direct_domains="${DIRECT_DOMAINS:-localhost host.docker.internal kirors-kiro}"
+direct_domains="${DIRECT_DOMAINS:-localhost host.docker.internal kiro-rs kirors-kiro}"
 direct_cidrs="${DIRECT_CIDRS:-127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 ::1/128 fc00::/7 fe80::/10}"
 squid_http_port="${SQUID_HTTP_PORT:-3128}"
 log_dir="/var/log/squid"
