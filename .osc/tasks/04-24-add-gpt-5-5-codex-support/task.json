@@ -1,0 +1,14 @@
+{
+  "name": "Add GPT-5.5 Codex model support",
+  "type": "feature",
+  "branch": "task/add-gpt-5-5-codex-support",
+  "priority": "P2",
+  "description": "",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-04-24T02:02:09Z"
+}
