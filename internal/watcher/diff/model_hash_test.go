@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 )
 
 func TestComputeOpenAICompatModelsHash_Deterministic(t *testing.T) {
@@ -43,6 +44,38 @@ func TestComputeOpenAICompatModelsHash_NormalizesAndDedups(t *testing.T) {
 	}
 	if h1 != h2 {
 		t.Fatalf("expected normalized hashes to match, got %s / %s", h1, h2)
+	}
+}
+
+func TestComputeOpenAICompatModelsHash_ThinkingChangesHash(t *testing.T) {
+	base := []config.OpenAICompatibilityModel{
+		{
+			Name:  "deepseek-v4-flash",
+			Alias: "deepseek-v4-flash",
+			Thinking: &registry.ThinkingSupport{
+				Levels:      []string{"low", "medium", "high"},
+				ZeroAllowed: true,
+			},
+		},
+	}
+	changed := []config.OpenAICompatibilityModel{
+		{
+			Name:  "deepseek-v4-flash",
+			Alias: "deepseek-v4-flash",
+			Thinking: &registry.ThinkingSupport{
+				Levels:      []string{"low", "medium", "high", "xhigh"},
+				ZeroAllowed: true,
+			},
+		},
+	}
+
+	hash1 := ComputeOpenAICompatModelsHash(base)
+	hash2 := ComputeOpenAICompatModelsHash(changed)
+	if hash1 == "" || hash2 == "" {
+		t.Fatal("expected non-empty hashes")
+	}
+	if hash1 == hash2 {
+		t.Fatalf("expected thinking metadata to affect hash, got %s", hash1)
 	}
 }
 

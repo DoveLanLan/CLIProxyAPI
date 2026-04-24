@@ -15,12 +15,11 @@ import (
 func ComputeOpenAICompatModelsHash(models []config.OpenAICompatibilityModel) string {
 	keys := normalizeModelPairs(func(out func(key string)) {
 		for _, model := range models {
-			name := strings.TrimSpace(model.Name)
-			alias := strings.TrimSpace(model.Alias)
-			if name == "" && alias == "" {
+			key := openAICompatModelKey(model)
+			if key == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias))
+			out(key)
 		}
 	})
 	return hashJoined(keys)
@@ -129,4 +128,54 @@ func hashJoined(keys []string) string {
 	}
 	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
 	return hex.EncodeToString(sum[:])
+}
+
+type openAICompatThinkingKey struct {
+	Min            int      `json:"min,omitempty"`
+	Max            int      `json:"max,omitempty"`
+	ZeroAllowed    bool     `json:"zero_allowed,omitempty"`
+	DynamicAllowed bool     `json:"dynamic_allowed,omitempty"`
+	Levels         []string `json:"levels,omitempty"`
+}
+
+type openAICompatModelKeyPayload struct {
+	Name     string                   `json:"name,omitempty"`
+	Alias    string                   `json:"alias,omitempty"`
+	Thinking *openAICompatThinkingKey `json:"thinking,omitempty"`
+}
+
+func openAICompatModelKey(model config.OpenAICompatibilityModel) string {
+	name := strings.ToLower(strings.TrimSpace(model.Name))
+	alias := strings.ToLower(strings.TrimSpace(model.Alias))
+	if name == "" && alias == "" {
+		return ""
+	}
+
+	payload := openAICompatModelKeyPayload{
+		Name:  name,
+		Alias: alias,
+	}
+	if thinking := model.Thinking; thinking != nil {
+		normalized := &openAICompatThinkingKey{
+			Min:            thinking.Min,
+			Max:            thinking.Max,
+			ZeroAllowed:    thinking.ZeroAllowed,
+			DynamicAllowed: thinking.DynamicAllowed,
+		}
+		if len(thinking.Levels) > 0 {
+			levels := make([]string, 0, len(thinking.Levels))
+			for _, level := range thinking.Levels {
+				if trimmed := strings.ToLower(strings.TrimSpace(level)); trimmed != "" {
+					levels = append(levels, trimmed)
+				}
+			}
+			if len(levels) > 0 {
+				normalized.Levels = levels
+			}
+		}
+		payload.Thinking = normalized
+	}
+
+	data, _ := json.Marshal(payload)
+	return string(data)
 }

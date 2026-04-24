@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 )
 
 func TestDiffOpenAICompatibility(t *testing.T) {
@@ -65,6 +66,42 @@ func TestDiffOpenAICompatibility_RemovedAndUnchanged(t *testing.T) {
 	newList = nil
 	changes := DiffOpenAICompatibility(oldList, newList)
 	expectContains(t, changes, "provider removed: provider-a (api-keys=1, models=1)")
+}
+
+func TestDiffOpenAICompatibility_ThinkingMetadataChange(t *testing.T) {
+	oldList := []config.OpenAICompatibility{
+		{
+			Name:          "deepseek",
+			APIKeyEntries: []config.OpenAICompatibilityAPIKey{{APIKey: "key-a"}},
+			Models: []config.OpenAICompatibilityModel{
+				{
+					Name:  "deepseek-v4-flash",
+					Alias: "deepseek-v4-flash",
+					Thinking: &registry.ThinkingSupport{
+						Levels: []string{"low", "medium", "high"},
+					},
+				},
+			},
+		},
+	}
+	newList := []config.OpenAICompatibility{
+		{
+			Name:          "deepseek",
+			APIKeyEntries: []config.OpenAICompatibilityAPIKey{{APIKey: "key-a"}},
+			Models: []config.OpenAICompatibilityModel{
+				{
+					Name:  "deepseek-v4-flash",
+					Alias: "deepseek-v4-flash",
+					Thinking: &registry.ThinkingSupport{
+						Levels: []string{"low", "medium", "high", "xhigh"},
+					},
+				},
+			},
+		},
+	}
+
+	changes := DiffOpenAICompatibility(oldList, newList)
+	expectContains(t, changes, "provider updated: deepseek (model metadata updated)")
 }
 
 func TestOpenAICompatKeyFallbacks(t *testing.T) {
@@ -160,6 +197,37 @@ func TestOpenAICompatSignature_StableAndNormalized(t *testing.T) {
 	c.Models = append(c.Models, config.OpenAICompatibilityModel{Name: "m2"})
 	if sigC := openAICompatSignature(c); sigC == sigB {
 		t.Fatalf("expected signature to change when models change, got %s", sigC)
+	}
+}
+
+func TestOpenAICompatSignature_ThinkingChangesSignature(t *testing.T) {
+	base := config.OpenAICompatibility{
+		Name: "deepseek",
+		Models: []config.OpenAICompatibilityModel{
+			{
+				Name:  "deepseek-v4-flash",
+				Alias: "deepseek-v4-flash",
+				Thinking: &registry.ThinkingSupport{
+					Levels: []string{"low", "medium", "high"},
+				},
+			},
+		},
+	}
+	changed := config.OpenAICompatibility{
+		Name: "deepseek",
+		Models: []config.OpenAICompatibilityModel{
+			{
+				Name:  "deepseek-v4-flash",
+				Alias: "deepseek-v4-flash",
+				Thinking: &registry.ThinkingSupport{
+					Levels: []string{"low", "medium", "high", "xhigh"},
+				},
+			},
+		},
+	}
+
+	if sigA, sigB := openAICompatSignature(base), openAICompatSignature(changed); sigA == "" || sigA == sigB {
+		t.Fatalf("expected thinking metadata to change signature, got %q / %q", sigA, sigB)
 	}
 }
 

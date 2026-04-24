@@ -65,12 +65,16 @@ func describeOpenAICompatibilityUpdate(oldEntry, newEntry config.OpenAICompatibi
 	newKeyCount := countAPIKeys(newEntry)
 	oldModelCount := countOpenAIModels(oldEntry.Models)
 	newModelCount := countOpenAIModels(newEntry.Models)
+	oldModelsHash := ComputeOpenAICompatModelsHash(oldEntry.Models)
+	newModelsHash := ComputeOpenAICompatModelsHash(newEntry.Models)
 	details := make([]string, 0, 3)
 	if oldKeyCount != newKeyCount {
 		details = append(details, fmt.Sprintf("api-keys %d -> %d", oldKeyCount, newKeyCount))
 	}
 	if oldModelCount != newModelCount {
 		details = append(details, fmt.Sprintf("models %d -> %d", oldModelCount, newModelCount))
+	} else if oldModelsHash != newModelsHash {
+		details = append(details, "model metadata updated")
 	}
 	if !equalStringMap(oldEntry.Headers, newEntry.Headers) {
 		details = append(details, "headers updated")
@@ -145,12 +149,11 @@ func openAICompatSignature(entry config.OpenAICompatibility) string {
 
 	models := make([]string, 0, len(entry.Models))
 	for _, model := range entry.Models {
-		name := strings.TrimSpace(model.Name)
-		alias := strings.TrimSpace(model.Alias)
-		if name == "" && alias == "" {
+		key := openAICompatModelKey(model)
+		if key == "" {
 			continue
 		}
-		models = append(models, strings.ToLower(name)+"|"+strings.ToLower(alias))
+		models = append(models, key)
 	}
 	if len(models) > 0 {
 		sort.Strings(models)
