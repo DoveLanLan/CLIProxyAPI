@@ -56,3 +56,89 @@ func TestOpenAICompatExecutorCompactPassthrough(t *testing.T) {
 		t.Fatalf("payload = %s", string(resp.Payload))
 	}
 }
+
+func TestOpenAICompatExecutorDeepSeekNormalizesReasoningEcho(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	payload := []byte(`{
+		"model":"deepseek-v4-flash",
+		"messages":[
+			{"role":"assistant","content":"plan","reasoning_content":"previous reasoning"},
+			{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{}"}}]},
+			{"role":"tool","content":"result"}
+		]
+	}`)
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "deepseek-v4-flash",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Stream:       false,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if got := gjson.GetBytes(gotBody, "messages.1.reasoning_content").String(); got != "previous reasoning" {
+		t.Fatalf("messages.1.reasoning_content = %q, want %q", got, "previous reasoning")
+	}
+	if got := gjson.GetBytes(gotBody, "messages.2.tool_call_id").String(); got != "call_1" {
+		t.Fatalf("messages.2.tool_call_id = %q, want %q", got, "call_1")
+	}
+}
+
+func TestOpenAICompatExecutorSkipsNormalizationForNonDeepSeek(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	payload := []byte(`{
+		"model":"gpt-4o",
+		"messages":[
+			{"role":"assistant","content":"plan","reasoning_content":"previous reasoning"},
+			{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{}"}}]},
+			{"role":"tool","content":"result"}
+		]
+	}`)
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-4o",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Stream:       false,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if gjson.GetBytes(gotBody, "messages.1.reasoning_content").Exists() {
+		t.Fatalf("messages.1.reasoning_content should be absent, got %q", gjson.GetBytes(gotBody, "messages.1.reasoning_content").String())
+	}
+	if gjson.GetBytes(gotBody, "messages.2.tool_call_id").Exists() {
+		t.Fatalf("messages.2.tool_call_id should be absent, got %q", gjson.GetBytes(gotBody, "messages.2.tool_call_id").String())
+	}
+}

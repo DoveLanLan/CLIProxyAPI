@@ -1949,5 +1949,49 @@
         ]
       }
     }
+  ],
+  "deepseek": [
+    {
+      "id": "deepseek-v4-flash",
+      "object": "model",
+      "created": 1774252800,
+      "owned_by": "deepseek",
+      "type": "openai",
+      "display_name": "DeepSeek V4 Flash",
+      "version": "deepseek-v4-flash",
+      "description": "DeepSeek V4 Flash - Fast inference model, 1M context, 384K max output",
+      "context_length": 1000000,
+      "max_completion_tokens": 384000,
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "zero_allowed": true
+      }
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "object": "model",
+      "created": 1774252800,
+      "owned_by": "deepseek",
+      "type": "openai",
+      "display_name": "DeepSeek V4 Pro",
+      "version": "deepseek-v4-pro",
+      "description": "DeepSeek V4 Pro - flagship model, 1M context, 384K max output",
+      "context_length": 1000000,
+      "max_completion_tokens": 384000,
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "zero_allowed": true
+      }
+    }
   ]
 }
