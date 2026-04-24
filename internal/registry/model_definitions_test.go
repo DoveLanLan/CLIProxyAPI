@@ -2,18 +2,28 @@ package registry
 
 import "testing"
 
-func TestOpenAIStaticModelsIncludeGPT55(t *testing.T) {
-	model := findModelInfo(GetOpenAIModels(), "gpt-5.5")
-	if model == nil {
-		t.Fatal("expected GetOpenAIModels to include gpt-5.5")
+func TestCodexStaticModelsIncludeGPT55(t *testing.T) {
+	tierModels := map[string][]*ModelInfo{
+		"team": GetCodexTeamModels(),
+		"plus": GetCodexPlusModels(),
+		"pro":  GetCodexProModels(),
 	}
-	assertGPT55ModelInfo(t, "GetOpenAIModels", model)
 
-	lookup := LookupStaticModelInfo("gpt-5.5")
-	if lookup == nil {
+	for tier, models := range tierModels {
+		t.Run(tier, func(t *testing.T) {
+			model := findModelInfo(models, "gpt-5.5")
+			if model == nil {
+				t.Fatalf("expected codex %s tier to include gpt-5.5", tier)
+			}
+			assertGPT55ModelInfo(t, tier, model)
+		})
+	}
+
+	model := LookupStaticModelInfo("gpt-5.5")
+	if model == nil {
 		t.Fatal("expected LookupStaticModelInfo to find gpt-5.5")
 	}
-	assertGPT55ModelInfo(t, "LookupStaticModelInfo", lookup)
+	assertGPT55ModelInfo(t, "lookup", model)
 }
 
 func findModelInfo(models []*ModelInfo, id string) *ModelInfo {
@@ -35,7 +45,7 @@ func assertGPT55ModelInfo(t *testing.T, source string, model *ModelInfo) {
 		t.Fatalf("%s object mismatch: got %q", source, model.Object)
 	}
 	if model.Created != 1776902400 {
-		t.Fatalf("%s created mismatch: got %d", source, model.Created)
+		t.Fatalf("%s created timestamp mismatch: got %d", source, model.Created)
 	}
 	if model.OwnedBy != "openai" {
 		t.Fatalf("%s owned_by mismatch: got %q", source, model.OwnedBy)
@@ -43,11 +53,11 @@ func assertGPT55ModelInfo(t *testing.T, source string, model *ModelInfo) {
 	if model.Type != "openai" {
 		t.Fatalf("%s type mismatch: got %q", source, model.Type)
 	}
-	if model.Version != "gpt-5.5" {
-		t.Fatalf("%s version mismatch: got %q", source, model.Version)
-	}
 	if model.DisplayName != "GPT 5.5" {
 		t.Fatalf("%s display name mismatch: got %q", source, model.DisplayName)
+	}
+	if model.Version != "gpt-5.5" {
+		t.Fatalf("%s version mismatch: got %q", source, model.Version)
 	}
 	if model.Description != "Frontier model for complex coding, research, and real-world work." {
 		t.Fatalf("%s description mismatch: got %q", source, model.Description)
@@ -62,16 +72,16 @@ func assertGPT55ModelInfo(t *testing.T, source string, model *ModelInfo) {
 		t.Fatalf("%s supported parameters mismatch: got %v", source, model.SupportedParameters)
 	}
 	if model.Thinking == nil {
-		t.Fatalf("%s thinking mismatch: expected non-nil", source)
+		t.Fatalf("%s missing thinking support", source)
 	}
 
-	wantLevels := []string{"low", "medium", "high", "xhigh"}
-	if len(model.Thinking.Levels) != len(wantLevels) {
-		t.Fatalf("%s thinking levels length mismatch: got %d", source, len(model.Thinking.Levels))
+	want := []string{"low", "medium", "high", "xhigh"}
+	if len(model.Thinking.Levels) != len(want) {
+		t.Fatalf("%s thinking level count mismatch: got %d, want %d", source, len(model.Thinking.Levels), len(want))
 	}
-	for idx, level := range wantLevels {
-		if model.Thinking.Levels[idx] != level {
-			t.Fatalf("%s thinking level %d mismatch: got %q want %q", source, idx, model.Thinking.Levels[idx], level)
+	for i, level := range want {
+		if model.Thinking.Levels[i] != level {
+			t.Fatalf("%s thinking level %d mismatch: got %q, want %q", source, i, model.Thinking.Levels[i], level)
 		}
 	}
 }
