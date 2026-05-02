@@ -9,6 +9,6 @@
   "current_phase": 0,
   "next_action": [],
   "requires_change_workflow": true,
-  "change_workflow_status": "closed",
+  "change_workflow_status": "ready",
   "completed_at": "2026-05-02T05:53:18Z"
 }
