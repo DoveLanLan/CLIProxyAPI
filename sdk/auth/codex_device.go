@@ -3,8 +3,6 @@ package auth
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -258,23 +256,16 @@ func (a *CodexAuthenticator) buildAuthRecord(authSvc *codex.CodexAuth, authBundl
 		return nil, fmt.Errorf("codex token storage missing account information")
 	}
 
-	planType := ""
-	hashAccountID := ""
-	if tokenStorage.IDToken != "" {
-		if claims, errParse := codex.ParseJWTToken(tokenStorage.IDToken); errParse == nil && claims != nil {
-			planType = strings.TrimSpace(claims.CodexAuthInfo.ChatgptPlanType)
-			accountID := strings.TrimSpace(claims.CodexAuthInfo.ChatgptAccountID)
-			if accountID != "" {
-				digest := sha256.Sum256([]byte(accountID))
-				hashAccountID = hex.EncodeToString(digest[:])[:8]
-			}
-		}
-	}
+	identity := codex.ExtractIdentityMetadata(tokenStorage.IDToken, tokenStorage.Email)
 
-	fileName := codex.CredentialFileName(tokenStorage.Email, planType, hashAccountID, true)
+	fileName := codex.CredentialFileName(tokenStorage.Email, identity.PlanType, identity.CodexAccountHash, true)
 	metadata := map[string]any{
-		"email": tokenStorage.Email,
+		"email":      tokenStorage.Email,
+		"account_id": tokenStorage.AccountID,
 	}
+	identity.ApplyToMetadata(metadata)
+	attributes := map[string]string{}
+	identity.ApplyToAttributes(attributes)
 
 	fmt.Println("Codex authentication successful")
 	if authBundle.APIKey != "" {
@@ -282,13 +273,11 @@ func (a *CodexAuthenticator) buildAuthRecord(authSvc *codex.CodexAuth, authBundl
 	}
 
 	return &coreauth.Auth{
-		ID:       fileName,
-		Provider: a.Provider(),
-		FileName: fileName,
-		Storage:  tokenStorage,
-		Metadata: metadata,
-		Attributes: map[string]string{
-			"plan_type": planType,
-		},
+		ID:         fileName,
+		Provider:   a.Provider(),
+		FileName:   fileName,
+		Storage:    tokenStorage,
+		Metadata:   metadata,
+		Attributes: attributes,
 	}, nil
 }

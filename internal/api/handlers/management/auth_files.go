@@ -3,8 +3,6 @@ package management
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -488,6 +486,9 @@ func extractCodexIDTokenClaims(auth *coreauth.Auth) gin.H {
 	result := gin.H{}
 	if v := strings.TrimSpace(claims.CodexAuthInfo.ChatgptAccountID); v != "" {
 		result["chatgpt_account_id"] = v
+	}
+	if v := strings.TrimSpace(claims.CodexAuthInfo.ChatgptUserID); v != "" {
+		result["chatgpt_user_id"] = v
 	}
 	if v := strings.TrimSpace(claims.CodexAuthInfo.ChatgptPlanType); v != "" {
 		result["plan_type"] = v
@@ -1893,30 +1894,21 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 			return
 		}
 
-		// Extract additional info for filename generation
-		claims, _ := codex.ParseJWTToken(bundle.TokenData.IDToken)
-		planType := ""
-		hashAccountID := ""
-		if claims != nil {
-			planType = strings.TrimSpace(claims.CodexAuthInfo.ChatgptPlanType)
-			if accountID := claims.GetAccountID(); accountID != "" {
-				digest := sha256.Sum256([]byte(accountID))
-				hashAccountID = hex.EncodeToString(digest[:])[:8]
-			}
-		}
-
 		// Create token storage and persist
 		tokenStorage := openaiAuth.CreateTokenStorage(bundle)
-		fileName := codex.CredentialFileName(tokenStorage.Email, planType, hashAccountID, true)
+		identity := codex.ExtractIdentityMetadata(tokenStorage.IDToken, tokenStorage.Email)
+		fileName := codex.CredentialFileName(tokenStorage.Email, identity.PlanType, identity.CodexAccountHash, true)
+		metadata := map[string]any{
+			"email":      tokenStorage.Email,
+			"account_id": tokenStorage.AccountID,
+		}
+		identity.ApplyToMetadata(metadata)
 		record := &coreauth.Auth{
 			ID:       fileName,
 			Provider: "codex",
 			FileName: fileName,
 			Storage:  tokenStorage,
-			Metadata: map[string]any{
-				"email":      tokenStorage.Email,
-				"account_id": tokenStorage.AccountID,
-			},
+			Metadata: metadata,
 		}
 		savedPath, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {

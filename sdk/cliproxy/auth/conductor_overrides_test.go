@@ -224,6 +224,34 @@ func (e *authFallbackExecutor) StreamCalls() []string {
 	return out
 }
 
+type captureStore struct {
+	mu    sync.Mutex
+	saved map[string]*Auth
+}
+
+func (s *captureStore) List(context.Context) ([]*Auth, error) { return nil, nil }
+
+func (s *captureStore) Save(_ context.Context, auth *Auth) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saved == nil {
+		s.saved = make(map[string]*Auth)
+	}
+	s.saved[auth.ID] = auth.Clone()
+	return "", nil
+}
+
+func (s *captureStore) Delete(context.Context, string) error { return nil }
+
+func (s *captureStore) Saved(id string) *Auth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saved == nil || s.saved[id] == nil {
+		return nil
+	}
+	return s.saved[id].Clone()
+}
+
 type retryAfterStatusError struct {
 	status     int
 	message    string
@@ -282,6 +310,200 @@ func newCredentialRetryLimitTestManager(t *testing.T, maxRetryCredentials int) (
 	}
 
 	return m, executor
+}
+
+func TestManager_CodexInvalidatedOAuthTokenDisablesAndFallsBackWithMaxRetryOne(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	m.SetRetryConfig(0, 0, 1)
+
+	badAuthID := "aa-invalidated-codex"
+	goodAuthID := "bb-good-codex"
+	model := "codex-invalidated-" + uuid.NewString()
+	executor := &authFallbackExecutor{
+		id: "codex",
+		executeErrors: map[string]error{
+			badAuthID: &Error{
+				HTTPStatus: http.StatusUnauthorized,
+				Message:    `{"error":{"message":"invalidated oauth token"}}`,
+			},
+		},
+	}
+	m.RegisterExecutor(executor)
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(badAuthID, "codex", []*registry.ModelInfo{{ID: model}})
+	reg.RegisterClient(goodAuthID, "codex", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(badAuthID)
+		reg.UnregisterClient(goodAuthID)
+	})
+
+	ctx := context.Background()
+	if _, errRegister := m.Register(WithSkipPersist(ctx), &Auth{
+		ID:       badAuthID,
+		Provider: "codex",
+		Metadata: map[string]any{
+			"type":          "codex",
+			"access_token":  "bad-access-token",
+			"refresh_token": "bad-refresh-token",
+		},
+	}); errRegister != nil {
+		t.Fatalf("register bad auth: %v", errRegister)
+	}
+	if _, errRegister := m.Register(WithSkipPersist(ctx), &Auth{
+		ID:       goodAuthID,
+		Provider: "codex",
+		Metadata: map[string]any{
+			"type": "codex",
+		},
+	}); errRegister != nil {
+		t.Fatalf("register good auth: %v", errRegister)
+	}
+
+	store := &captureStore{}
+	m.SetStore(store)
+
+	resp, errExecute := m.Execute(ctx, []string{"codex"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute != nil {
+		t.Fatalf("execute error = %v, want success", errExecute)
+	}
+	if string(resp.Payload) != goodAuthID {
+		t.Fatalf("payload = %q, want %q", string(resp.Payload), goodAuthID)
+	}
+
+	gotCalls := executor.ExecuteCalls()
+	wantCalls := []string{badAuthID, goodAuthID}
+	if len(gotCalls) != len(wantCalls) {
+		t.Fatalf("execute calls = %v, want %v", gotCalls, wantCalls)
+	}
+	for i := range wantCalls {
+		if gotCalls[i] != wantCalls[i] {
+			t.Fatalf("execute call %d = %q, want %q", i, gotCalls[i], wantCalls[i])
+		}
+	}
+
+	updatedBad, ok := m.GetByID(badAuthID)
+	if !ok || updatedBad == nil {
+		t.Fatalf("expected bad auth to remain registered")
+	}
+	if !updatedBad.Disabled || updatedBad.Status != StatusDisabled {
+		t.Fatalf("expected bad auth disabled, got disabled=%v status=%s", updatedBad.Disabled, updatedBad.Status)
+	}
+	if updatedBad.StatusMessage != codexOAuthInvalidatedReason {
+		t.Fatalf("status message = %q, want %q", updatedBad.StatusMessage, codexOAuthInvalidatedReason)
+	}
+	if got := updatedBad.Metadata["disabled"]; got != true {
+		t.Fatalf("metadata disabled = %v, want true", got)
+	}
+	if got := updatedBad.Metadata["disabled_reason"]; got != codexOAuthInvalidatedReason {
+		t.Fatalf("metadata disabled_reason = %v, want %q", got, codexOAuthInvalidatedReason)
+	}
+
+	updatedGood, ok := m.GetByID(goodAuthID)
+	if !ok || updatedGood == nil {
+		t.Fatalf("expected good auth to remain registered")
+	}
+	if updatedGood.Disabled || updatedGood.Status == StatusDisabled {
+		t.Fatalf("expected good auth to stay enabled, got disabled=%v status=%s", updatedGood.Disabled, updatedGood.Status)
+	}
+
+	savedBad := store.Saved(badAuthID)
+	if savedBad == nil {
+		t.Fatalf("expected bad auth to be persisted")
+	}
+	if !savedBad.Disabled || savedBad.Metadata["disabled_reason"] != codexOAuthInvalidatedReason {
+		t.Fatalf("persisted bad auth disabled=%v reason=%v", savedBad.Disabled, savedBad.Metadata["disabled_reason"])
+	}
+}
+
+func TestManager_CodexGeneric401UsesTemporaryCooldownAndMaxRetryLimit(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	m.SetRetryConfig(0, 0, 1)
+
+	badAuthID := "aa-generic-401-codex"
+	goodAuthID := "bb-good-generic-401-codex"
+	model := "codex-generic-401-" + uuid.NewString()
+	executor := &authFallbackExecutor{
+		id: "codex",
+		executeErrors: map[string]error{
+			badAuthID: &Error{
+				HTTPStatus: http.StatusUnauthorized,
+				Message:    "unauthorized",
+			},
+		},
+	}
+	m.RegisterExecutor(executor)
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(badAuthID, "codex", []*registry.ModelInfo{{ID: model}})
+	reg.RegisterClient(goodAuthID, "codex", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(badAuthID)
+		reg.UnregisterClient(goodAuthID)
+	})
+
+	ctx := context.Background()
+	if _, errRegister := m.Register(WithSkipPersist(ctx), &Auth{
+		ID:       badAuthID,
+		Provider: "codex",
+		Metadata: map[string]any{
+			"type": "codex",
+		},
+	}); errRegister != nil {
+		t.Fatalf("register bad auth: %v", errRegister)
+	}
+	if _, errRegister := m.Register(WithSkipPersist(ctx), &Auth{
+		ID:       goodAuthID,
+		Provider: "codex",
+		Metadata: map[string]any{
+			"type": "codex",
+		},
+	}); errRegister != nil {
+		t.Fatalf("register good auth: %v", errRegister)
+	}
+
+	store := &captureStore{}
+	m.SetStore(store)
+
+	_, errExecute := m.Execute(ctx, []string{"codex"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute == nil {
+		t.Fatalf("expected generic 401 error")
+	}
+	if statusCodeFromError(errExecute) != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", statusCodeFromError(errExecute), http.StatusUnauthorized)
+	}
+
+	gotCalls := executor.ExecuteCalls()
+	wantCalls := []string{badAuthID}
+	if len(gotCalls) != len(wantCalls) || gotCalls[0] != wantCalls[0] {
+		t.Fatalf("execute calls = %v, want %v", gotCalls, wantCalls)
+	}
+
+	updatedBad, ok := m.GetByID(badAuthID)
+	if !ok || updatedBad == nil {
+		t.Fatalf("expected bad auth to remain registered")
+	}
+	if updatedBad.Disabled || updatedBad.Status == StatusDisabled {
+		t.Fatalf("generic 401 should not disable auth, got disabled=%v status=%s", updatedBad.Disabled, updatedBad.Status)
+	}
+	state := updatedBad.ModelStates[model]
+	if state == nil {
+		t.Fatalf("expected model cooldown state")
+	}
+	if !state.Unavailable || state.NextRetryAfter.IsZero() {
+		t.Fatalf("expected temporary model cooldown, got unavailable=%v next=%v", state.Unavailable, state.NextRetryAfter)
+	}
+	if updatedBad.Metadata["disabled"] == true {
+		t.Fatalf("generic 401 should not persist disabled=true")
+	}
+
+	savedBad := store.Saved(badAuthID)
+	if savedBad == nil {
+		t.Fatalf("expected bad auth to be persisted")
+	}
+	if savedBad.Disabled || savedBad.Metadata["disabled"] == true {
+		t.Fatalf("persisted generic 401 auth should stay enabled, got disabled=%v metadata=%v", savedBad.Disabled, savedBad.Metadata["disabled"])
+	}
 }
 
 func TestManager_MaxRetryCredentials_LimitsCrossCredentialRetries(t *testing.T) {

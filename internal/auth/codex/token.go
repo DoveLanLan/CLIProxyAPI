@@ -14,7 +14,7 @@ import (
 
 // CodexTokenStorage stores OAuth2 token information for OpenAI Codex API authentication.
 // It maintains compatibility with the existing auth system while adding Codex-specific fields
-// for managing access tokens, refresh tokens, and user account information.
+// for managing access tokens, refresh tokens, and account identity information.
 type CodexTokenStorage struct {
 	// IDToken is the JWT ID token containing user claims and identity information.
 	IDToken string `json:"id_token"`
@@ -22,7 +22,8 @@ type CodexTokenStorage struct {
 	AccessToken string `json:"access_token"`
 	// RefreshToken is used to obtain new access tokens when the current one expires.
 	RefreshToken string `json:"refresh_token"`
-	// AccountID is the OpenAI account identifier associated with this token.
+	// AccountID is the ChatGPT account/workspace identifier used by Codex headers.
+	// It is not unique to a human user on team accounts.
 	AccountID string `json:"account_id"`
 	// LastRefresh is the timestamp of the last token refresh operation.
 	LastRefresh string `json:"last_refresh"`

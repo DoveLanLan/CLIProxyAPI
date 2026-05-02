@@ -1,0 +1,14 @@
+{
+  "name": "Fix Codex OAuth invalidated token failover",
+  "type": "bugfix",
+  "branch": "task/fix-codex-oauth-invalidated-failover",
+  "priority": "P1",
+  "description": "Quarantine invalidated Codex OAuth tokens and fail over without treating shared team account IDs as duplicate users.",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-05-02T05:53:18Z"
+}

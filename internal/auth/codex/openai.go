@@ -11,7 +11,7 @@ type PKCECodes struct {
 }
 
 // CodexTokenData holds the OAuth token information obtained from OpenAI.
-// It includes the ID token, access token, refresh token, and associated user details.
+// It includes the ID token, access token, refresh token, and associated account details.
 type CodexTokenData struct {
 	// IDToken is the JWT ID token containing user claims
 	IDToken string `json:"id_token"`
@@ -19,7 +19,8 @@ type CodexTokenData struct {
 	AccessToken string `json:"access_token"`
 	// RefreshToken is used to obtain new access tokens
 	RefreshToken string `json:"refresh_token"`
-	// AccountID is the OpenAI account identifier
+	// AccountID is the ChatGPT account/workspace identifier used by Codex headers.
+	// It is not unique to a human user on team accounts.
 	AccountID string `json:"account_id"`
 	// Email is the OpenAI account email
 	Email string `json:"email"`

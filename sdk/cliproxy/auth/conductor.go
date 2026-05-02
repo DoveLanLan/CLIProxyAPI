@@ -68,9 +68,10 @@ const (
 	// success but the auth still evaluates as needing refresh (e.g. token expiry
 	// wasn't updated). Without this guard, the auto-refresh loop can tight-loop and
 	// burn CPU at idle.
-	refreshIneffectiveBackoff = 30 * time.Second
-	quotaBackoffBase          = time.Second
-	quotaBackoffMax           = 30 * time.Minute
+	refreshIneffectiveBackoff   = 30 * time.Second
+	quotaBackoffBase            = time.Second
+	quotaBackoffMax             = 30 * time.Minute
+	codexOAuthInvalidatedReason = "codex oauth token invalidated; re-login required"
 )
 
 var quotaCooldownDisabled atomic.Bool
@@ -844,6 +845,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 			result.RetryAfter = retryAfterFromError(errStream)
 			m.MarkResult(ctx, result)
+			if isCodexOAuthTokenInvalidatedErrorForProvider(provider, errStream) {
+				return nil, errStream
+			}
 			if isRequestInvalidError(errStream) {
 				return nil, errStream
 			}
@@ -865,6 +869,10 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 				result.RetryAfter = retryAfterFromError(bootstrapErr)
 				m.MarkResult(ctx, result)
+				if isCodexOAuthTokenInvalidatedErrorForProvider(provider, bootstrapErr) {
+					discardStreamChunks(streamResult.Chunks)
+					return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
+				}
 				discardStreamChunks(streamResult.Chunks)
 				return nil, bootstrapErr
 			}
@@ -876,6 +884,10 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 				result.RetryAfter = retryAfterFromError(bootstrapErr)
 				m.MarkResult(ctx, result)
+				if isCodexOAuthTokenInvalidatedErrorForProvider(provider, bootstrapErr) {
+					discardStreamChunks(streamResult.Chunks)
+					return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
+				}
 				discardStreamChunks(streamResult.Chunks)
 				lastErr = bootstrapErr
 				continue
@@ -887,6 +899,10 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: rerr}
 			result.RetryAfter = retryAfterFromError(bootstrapErr)
 			m.MarkResult(ctx, result)
+			if isCodexOAuthTokenInvalidatedErrorForProvider(provider, bootstrapErr) {
+				discardStreamChunks(streamResult.Chunks)
+				return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
+			}
 			discardStreamChunks(streamResult.Chunks)
 			return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
 		}
@@ -1319,6 +1335,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 		}
 		attempted[auth.ID] = struct{}{}
 		var authErr error
+		invalidatedAuth := false
 		for _, upstreamModel := range models {
 			resultModel := m.stateModelForExecution(auth, routeModel, upstreamModel, pooled)
 			execReq := req
@@ -1337,6 +1354,11 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					result.RetryAfter = ra
 				}
 				m.MarkResult(execCtx, result)
+				if isCodexOAuthTokenInvalidatedErrorForProvider(provider, errExec) {
+					authErr = errExec
+					invalidatedAuth = true
+					break
+				}
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
 				}
@@ -1351,6 +1373,9 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr
+			if invalidatedAuth {
+				delete(attempted, auth.ID)
+			}
 			continue
 		}
 	}
@@ -1397,6 +1422,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 		}
 		attempted[auth.ID] = struct{}{}
 		var authErr error
+		invalidatedAuth := false
 		for _, upstreamModel := range models {
 			resultModel := m.stateModelForExecution(auth, routeModel, upstreamModel, pooled)
 			execReq := req
@@ -1415,6 +1441,11 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 					result.RetryAfter = ra
 				}
 				m.MarkResult(execCtx, result)
+				if isCodexOAuthTokenInvalidatedErrorForProvider(provider, errExec) {
+					authErr = errExec
+					invalidatedAuth = true
+					break
+				}
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
 				}
@@ -1429,6 +1460,9 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr
+			if invalidatedAuth {
+				delete(attempted, auth.ID)
+			}
 			continue
 		}
 	}
@@ -1490,6 +1524,9 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 				return nil, errStream
 			}
 			lastErr = errStream
+			if isCodexOAuthTokenInvalidatedErrorForProvider(provider, errStream) {
+				delete(attempted, auth.ID)
+			}
 			continue
 		}
 		return streamResult, nil
@@ -2008,7 +2045,9 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 				clearAuthStateOnSuccess(auth, now)
 			}
 		} else {
-			if result.Model != "" {
+			if isCodexOAuthTokenInvalidatedResult(auth, result) {
+				applyCodexOAuthTokenInvalidatedState(auth, result.Error, now)
+			} else if result.Model != "" {
 				if !isRequestScopedNotFoundResultError(result.Error) {
 					disableCooling := quotaCooldownDisabledForAuth(auth)
 					state := ensureModelState(auth, result.Model)
@@ -2337,6 +2376,58 @@ func statusCodeFromResult(err *Error) int {
 		return 0
 	}
 	return err.StatusCode()
+}
+
+func isCodexOAuthTokenInvalidatedErrorForProvider(provider string, err error) bool {
+	if !strings.EqualFold(strings.TrimSpace(provider), "codex") {
+		return false
+	}
+	if statusCodeFromError(err) != http.StatusUnauthorized {
+		return false
+	}
+	return messageContainsCodexOAuthInvalidated(err.Error())
+}
+
+func isCodexOAuthTokenInvalidatedResult(auth *Auth, result Result) bool {
+	if result.Error == nil {
+		return false
+	}
+	provider := result.Provider
+	if strings.TrimSpace(provider) == "" && auth != nil {
+		provider = auth.Provider
+	}
+	if !strings.EqualFold(strings.TrimSpace(provider), "codex") {
+		return false
+	}
+	if statusCodeFromResult(result.Error) != http.StatusUnauthorized {
+		return false
+	}
+	return messageContainsCodexOAuthInvalidated(result.Error.Message)
+}
+
+func messageContainsCodexOAuthInvalidated(message string) bool {
+	return strings.Contains(strings.ToLower(message), "invalidated oauth token")
+}
+
+func applyCodexOAuthTokenInvalidatedState(auth *Auth, resultErr *Error, now time.Time) {
+	if auth == nil {
+		return
+	}
+	auth.Disabled = true
+	auth.Unavailable = true
+	auth.Status = StatusDisabled
+	auth.StatusMessage = codexOAuthInvalidatedReason
+	auth.NextRetryAfter = time.Time{}
+	auth.Quota = QuotaState{}
+	auth.UpdatedAt = now
+	if resultErr != nil {
+		auth.LastError = cloneError(resultErr)
+	}
+	if auth.Metadata == nil {
+		auth.Metadata = make(map[string]any)
+	}
+	auth.Metadata["disabled"] = true
+	auth.Metadata["disabled_reason"] = codexOAuthInvalidatedReason
 }
 
 func isModelSupportErrorMessage(message string) bool {

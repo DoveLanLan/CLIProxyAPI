@@ -117,17 +117,24 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 	if disabled {
 		status = coreauth.StatusDisabled
 	}
+	statusMessage := ""
+	if disabled {
+		if disabledReason, ok := metadata["disabled_reason"].(string); ok {
+			statusMessage = strings.TrimSpace(disabledReason)
+		}
+	}
 
 	// Read per-account excluded models from the OAuth JSON file.
 	perAccountExcluded := extractExcludedModelsFromMetadata(metadata)
 
 	a := &coreauth.Auth{
-		ID:       id,
-		Provider: provider,
-		Label:    label,
-		Prefix:   prefix,
-		Status:   status,
-		Disabled: disabled,
+		ID:            id,
+		Provider:      provider,
+		Label:         label,
+		Prefix:        prefix,
+		Status:        status,
+		StatusMessage: statusMessage,
+		Disabled:      disabled,
 		Attributes: map[string]string{
 			"source": fullPath,
 			"path":   fullPath,
@@ -159,14 +166,21 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 	}
 	coreauth.ApplyCustomHeadersFromMetadata(a)
 	ApplyAuthExcludedModelsMeta(a, cfg, perAccountExcluded, "oauth")
-	// For codex auth files, extract plan_type from the JWT id_token.
+	// For codex auth files, extract safe identity metadata from the JWT id_token.
 	if provider == "codex" {
-		if idTokenRaw, ok := metadata["id_token"].(string); ok && strings.TrimSpace(idTokenRaw) != "" {
-			if claims, errParse := codex.ParseJWTToken(idTokenRaw); errParse == nil && claims != nil {
-				if pt := strings.TrimSpace(claims.CodexAuthInfo.ChatgptPlanType); pt != "" {
-					a.Attributes["plan_type"] = pt
-				}
+		if email, okEmail := metadata["email"].(string); okEmail && strings.TrimSpace(email) != "" {
+			a.Attributes["email"] = strings.TrimSpace(email)
+		}
+		for _, key := range []string{"chatgpt_account_id", "chatgpt_user_id", "codex_account_hash", "codex_user_hash", "plan_type"} {
+			if value, okValue := metadata[key].(string); okValue && strings.TrimSpace(value) != "" {
+				a.Attributes[key] = strings.TrimSpace(value)
 			}
+		}
+		if idTokenRaw, ok := metadata["id_token"].(string); ok && strings.TrimSpace(idTokenRaw) != "" {
+			email, _ := metadata["email"].(string)
+			identity := codex.ExtractIdentityMetadata(idTokenRaw, email)
+			identity.ApplyToMetadata(metadata)
+			identity.ApplyToAttributes(a.Attributes)
 		}
 	}
 	if provider == "gemini-cli" {

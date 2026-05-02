@@ -703,11 +703,17 @@ func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 		auth.Metadata["account_id"] = td.AccountID
 	}
 	auth.Metadata["email"] = td.Email
+	identity := codexauth.ExtractIdentityMetadata(td.IDToken, td.Email)
+	identity.ApplyToMetadata(auth.Metadata)
 	// Use unified key in files
 	auth.Metadata["expired"] = td.Expire
 	auth.Metadata["type"] = "codex"
 	now := time.Now().Format(time.RFC3339)
 	auth.Metadata["last_refresh"] = now
+	if auth.Attributes == nil {
+		auth.Attributes = make(map[string]string)
+	}
+	identity.ApplyToAttributes(auth.Attributes)
 	return auth, nil
 }
 
