@@ -1,0 +1,14 @@
+{
+  "name": "Fix OpenAI compat xhigh thinking preservation",
+  "type": "bugfix",
+  "branch": "task/fix-openai-compat-xhigh-thinking",
+  "priority": "P1",
+  "description": "Prevent OpenAI-compatible configured models, including namespaced DeepSeek models, from being over-clamped from xhigh to high by proxy-side default thinking metadata.",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 5,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "ready",
+  "completed_at": "2026-05-12T00:00:00+08:00"
+}

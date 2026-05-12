@@ -979,10 +979,7 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 						if modelID == "" {
 							modelID = m.Name
 						}
-						thinking := m.Thinking
-						if thinking == nil {
-							thinking = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
-						}
+						thinking := resolveOpenAICompatThinking(m)
 						ms = append(ms, &ModelInfo{
 							ID:          modelID,
 							Object:      "model",
@@ -1338,6 +1335,85 @@ func matchWildcard(pattern, value string) bool {
 type modelEntry interface {
 	GetName() string
 	GetAlias() string
+}
+
+var defaultOpenAICompatThinkingLevels = []string{"none", "low", "medium", "high", "xhigh"}
+
+func resolveOpenAICompatThinking(model config.OpenAICompatibilityModel) *registry.ThinkingSupport {
+	if model.Thinking != nil {
+		return cloneThinkingSupport(model.Thinking)
+	}
+	if thinking := lookupOpenAICompatStaticThinking(model.Name, model.Alias); thinking != nil {
+		return thinking
+	}
+	return defaultOpenAICompatThinkingSupport()
+}
+
+func lookupOpenAICompatStaticThinking(name, alias string) *registry.ThinkingSupport {
+	for _, candidate := range openAICompatModelIDCandidates(name, alias) {
+		info := registry.LookupStaticModelInfo(candidate)
+		if info == nil || info.Thinking == nil || len(info.Thinking.Levels) == 0 {
+			continue
+		}
+		return cloneThinkingSupport(info.Thinking)
+	}
+	return nil
+}
+
+func defaultOpenAICompatThinkingSupport() *registry.ThinkingSupport {
+	return &registry.ThinkingSupport{
+		Levels:      append([]string(nil), defaultOpenAICompatThinkingLevels...),
+		ZeroAllowed: true,
+	}
+}
+
+func cloneThinkingSupport(thinking *registry.ThinkingSupport) *registry.ThinkingSupport {
+	if thinking == nil {
+		return nil
+	}
+	cloned := *thinking
+	if len(thinking.Levels) > 0 {
+		cloned.Levels = append([]string(nil), thinking.Levels...)
+	}
+	return &cloned
+}
+
+func openAICompatModelIDCandidates(values ...string) []string {
+	seen := make(map[string]struct{})
+	candidates := make([]string, 0, len(values)*4)
+	add := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, exists := seen[candidate]; exists {
+			return
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		for _, variant := range []string{value, strings.ToLower(value)} {
+			add(variant)
+			if base, _, ok := strings.Cut(variant, ":"); ok {
+				add(base)
+			}
+			if idx := strings.LastIndex(variant, "/"); idx >= 0 && idx < len(variant)-1 {
+				leaf := variant[idx+1:]
+				add(leaf)
+				if base, _, ok := strings.Cut(leaf, ":"); ok {
+					add(base)
+				}
+			}
+		}
+	}
+
+	return candidates
 }
 
 func buildConfigModels[T modelEntry](models []T, ownedBy, modelType string) []*ModelInfo {

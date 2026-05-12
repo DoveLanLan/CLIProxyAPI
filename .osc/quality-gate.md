@@ -1,58 +1,71 @@
-# Quality Gate: Fix Codex OAuth Invalidated Token Failover
+# Quality Gate: Fix OpenAI Compat XHigh Thinking Preservation
 
-- Date: 2026-05-02
+- Date: 2026-05-12
 
 ## Assumptions
 
-- Change scope is backend auth metadata, auth-file synthesis, management Codex OAuth persistence, Codex refresh metadata, and auth manager failover.
-- No `internal/translator/**` changes are expected or allowed.
+- The change scope is backend/model-registration logic for OpenAI-compatible configured providers.
+- `config.yaml` is local and secret-bearing; it is intentionally not modified.
 
 ## Suspected Change Scope
 
-- `internal/auth/codex`
-- `sdk/auth`
-- `internal/watcher/synthesizer`
-- `sdk/cliproxy/auth`
-- `internal/runtime/executor`
-- `internal/api/handlers/management`
+- `sdk/cliproxy/service.go`: OpenAI-compatible model registration and thinking metadata defaults.
+- `sdk/cliproxy/service_openai_compat_thinking_test.go`: regression coverage.
+- `config.example.yaml`: documented default.
 
 ## Detected Gates
 
-- Gate Name: Go formatting. Confidence: High. Evidence: `AGENTS.md` requires `gofmt -w .` after Go changes.
-- Gate Name: Focused Go tests. Confidence: High. Evidence: `.osc/spec/project-spec.md` expects focused tests for auth scheduling and protocol behavior changes.
-- Gate Name: Server build. Confidence: High. Evidence: `AGENTS.md` and `.github/workflows/pr-test-build.yml` require `go build -o test-output ./cmd/server`.
-- Gate Name: Translator path guard. Confidence: High. Evidence: `AGENTS.md` and `.github/workflows/pr-path-guard.yml` protect `internal/translator/**`.
+- Gate Name: PR server build
+  - Confidence: High
+  - Evidence: `.github/workflows/pr-test-build.yml` runs `go build -o test-output ./cmd/server` then removes `test-output`.
+- Gate Name: Restricted translator path guard
+  - Confidence: High
+  - Evidence: `.github/workflows/pr-path-guard.yml` fails PRs touching `internal/translator/**`.
+- Gate Name: Go formatting
+  - Confidence: High
+  - Evidence: `AGENTS.md` requires `gofmt -w .` after Go changes.
+- Gate Name: Focused Go tests
+  - Confidence: Medium
+  - Evidence: package test layout and `AGENTS.md` command examples.
 
 ## Suggested Gate Run (Local)
 
-1. `gofmt -w <changed Go files>`: completed.
-2. `go test ./sdk/cliproxy/auth`: passed.
-3. `go test ./internal/watcher/synthesizer`: passed.
-4. `go test ./sdk/auth`: passed.
-5. `go test ./internal/auth/codex`: passed.
-6. `go test ./internal/runtime/executor`: passed.
-7. `go test ./internal/api/handlers/management`: passed.
-8. `go build -o test-output ./cmd/server && rm test-output`: passed.
+1. `gofmt -w sdk/cliproxy/service.go sdk/cliproxy/service_openai_compat_thinking_test.go`
+2. `go test ./sdk/cliproxy -run 'TestOpenAICompat.*Thinking|TestOpenAICompat.*DeepSeek|TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh'`
+3. `go test ./internal/watcher/diff -run TestComputeOpenAICompatModelsHash_ThinkingChangesHash`
+4. `go test ./sdk/cliproxy ./internal/thinking ./internal/watcher/diff`
+5. `go test ./test -run TestThinking`
+6. `go test ./...`
+7. `go build -o test-output ./cmd/server && rm test-output`
+
+## Results
+
+- PASS: `gofmt -w sdk/cliproxy/service.go sdk/cliproxy/service_openai_compat_thinking_test.go`
+- PASS: `go test ./sdk/cliproxy -run 'TestOpenAICompat.*Thinking|TestOpenAICompat.*DeepSeek|TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh'`
+- PASS: `go test ./internal/watcher/diff -run TestComputeOpenAICompatModelsHash_ThinkingChangesHash`
+- PASS: `go test ./sdk/cliproxy ./internal/thinking ./internal/watcher/diff`
+- PASS: `go test ./test -run TestThinking`
+- PASS: `go test ./...`
+- PASS: `go build -o test-output ./cmd/server && rm test-output`
 
 ## Final Self-Review
 
-- Security & secrets: no token logging added; new metadata fields are non-secret hashes or IDs already present in ID token claims.
-- Edge cases & error handling: invalidated-token matching is narrow; generic `401` behavior remains temporary cooldown.
-- Backward compatibility / migrations: existing auth files remain valid; new JSON fields are optional.
-- API/contract compatibility: no public API route or config changes.
-- Observability: persisted disabled reason is operator-readable.
-- Config/env changes: none.
-- Performance risk: low; JWT parsing was already used in these paths and remains request-independent except token refresh.
-- Rollback plan: revert this task's changes; optional new auth JSON metadata can remain ignored.
+- Security & secrets: no secret-bearing `config.yaml` edits.
+- Edge cases & error handling: explicit per-model thinking remains authoritative; prefixed models are covered.
+- Backward compatibility / migrations: no data or schema migrations.
+- API/contract compatibility: only prevents proxy-side over-clamping for compatible upstreams.
+- Observability: existing thinking debug logs still apply.
+- Config/env changes: no new fields; example comment updated.
+- Performance risk: negligible; metadata resolution runs during model registration.
+- Rollback plan: revert touched code/docs or explicitly restrict a model's `thinking.levels`.
 
 ## PR-ready checklist
 
-- [x] `gofmt -w <changed Go files>`
-- [x] `go test ./sdk/cliproxy/auth`
-- [x] `go test ./internal/watcher/synthesizer`
-- [x] `go test ./sdk/auth`
-- [x] `go test ./internal/auth/codex`
-- [x] `go test ./internal/runtime/executor`
-- [x] `go test ./internal/api/handlers/management`
+- [x] `gofmt -w sdk/cliproxy/service.go sdk/cliproxy/service_openai_compat_thinking_test.go`
+- [x] `go test ./sdk/cliproxy -run 'TestOpenAICompat.*Thinking|TestOpenAICompat.*DeepSeek|TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh'`
+- [x] `go test ./internal/watcher/diff -run TestComputeOpenAICompatModelsHash_ThinkingChangesHash`
+- [x] `go test ./sdk/cliproxy ./internal/thinking ./internal/watcher/diff`
+- [x] `go test ./test -run TestThinking`
+- [x] `go test ./...`
 - [x] `go build -o test-output ./cmd/server && rm test-output`
-- [x] Confirm no `internal/translator/**` files changed
+- [x] Confirm no `internal/translator/**` changes.
