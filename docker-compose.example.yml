@@ -26,3 +26,20 @@ services:
       - ${CLI_PROXY_AUTH_PATH:-./auths}:/root/.cli-proxy-api
       - ${CLI_PROXY_LOG_PATH:-./logs}:/CLIProxyAPI/logs
     restart: unless-stopped
+
+  cpa-manager:
+    image: seakee/cpa-manager:latest
+    container_name: cpa-manager
+    restart: unless-stopped
+    depends_on:
+      - cli-proxy-api
+    environment:
+      CPA_UPSTREAM_URL: ${CPA_MANAGER_CPA_URL:-http://cli-proxy-api:8317}
+      CPA_MANAGEMENT_KEY: ${CPA_MANAGEMENT_KEY:-}
+    ports:
+      - "${CPA_MANAGER_PORT:-18317}:18317"
+    volumes:
+      - cpa-manager-data:/data
+
+volumes:
+  cpa-manager-data:

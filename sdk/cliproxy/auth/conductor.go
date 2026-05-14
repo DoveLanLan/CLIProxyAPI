@@ -22,6 +22,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -828,6 +829,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 	if executor == nil {
 		return nil, &Error{Code: "executor_not_found", Message: "executor not registered"}
 	}
+	ctx = coreusage.WithRequestedModelAlias(ctx, routeModel)
 	var lastErr error
 	for idx, execModel := range execModels {
 		resultModel := m.stateModelForExecution(auth, routeModel, execModel, pooled)
@@ -1328,6 +1330,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
+		execCtx = coreusage.WithRequestedModelAlias(execCtx, routeModel)
 
 		models, pooled := m.preparedExecutionModels(auth, routeModel)
 		if len(models) == 0 {
@@ -1415,6 +1418,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
+		execCtx = coreusage.WithRequestedModelAlias(execCtx, routeModel)
 
 		models, pooled := m.preparedExecutionModels(auth, routeModel)
 		if len(models) == 0 {
@@ -1510,6 +1514,7 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
+		execCtx = coreusage.WithRequestedModelAlias(execCtx, routeModel)
 		models, pooled := m.preparedExecutionModels(auth, routeModel)
 		if len(models) == 0 {
 			continue
@@ -2027,6 +2032,12 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
 		now := time.Now()
+		auth.recordRecentRequest(now, result.Success)
+		if result.Success {
+			auth.Success++
+		} else {
+			auth.Failed++
+		}
 
 		if result.Success {
 			if result.Model != "" {

@@ -1,71 +1,60 @@
-# Quality Gate: Fix OpenAI Compat XHigh Thinking Preservation
-
-- Date: 2026-05-12
+# Quality Gate: Integrate CPA-Manager Panel and Usage Monitoring
 
 ## Assumptions
 
-- The change scope is backend/model-registration logic for OpenAI-compatible configured providers.
-- `config.yaml` is local and secret-bearing; it is intentionally not modified.
+- The change scope is backend management APIs, usage accounting, management-panel asset configuration, and Docker deployment examples.
+- No `internal/translator/**` source files are intentionally changed.
 
 ## Suspected Change Scope
 
-- `sdk/cliproxy/service.go`: OpenAI-compatible model registration and thinking metadata defaults.
-- `sdk/cliproxy/service_openai_compat_thinking_test.go`: regression coverage.
-- `config.example.yaml`: documented default.
+- Backend/runtime: `internal/redisqueue`, `internal/api/handlers/management`, `internal/api/server.go`, `sdk/cliproxy/*`, `internal/runtime/executor/helps`.
+- Config/deploy: `internal/config`, `config.example.yaml`, compose files, `deploy/README.md`.
+- UI integration: management panel asset source only; no in-repo browser app.
 
 ## Detected Gates
 
-- Gate Name: PR server build
+- Gate Name: Go build
   - Confidence: High
-  - Evidence: `.github/workflows/pr-test-build.yml` runs `go build -o test-output ./cmd/server` then removes `test-output`.
-- Gate Name: Restricted translator path guard
-  - Confidence: High
-  - Evidence: `.github/workflows/pr-path-guard.yml` fails PRs touching `internal/translator/**`.
-- Gate Name: Go formatting
+  - Evidence: `.github/workflows/pr-test-build.yml` runs `go build -o test-output ./cmd/server`.
+- Gate Name: Go tests
+  - Confidence: Medium
+  - Evidence: `AGENTS.md` lists `go test ./...`; many packages include `*_test.go`.
+- Gate Name: Go format
   - Confidence: High
   - Evidence: `AGENTS.md` requires `gofmt -w .` after Go changes.
-- Gate Name: Focused Go tests
-  - Confidence: Medium
-  - Evidence: package test layout and `AGENTS.md` command examples.
+- Gate Name: Translator path guard
+  - Confidence: High
+  - Evidence: `.github/workflows/pr-path-guard.yml` rejects `internal/translator/**` changes.
 
 ## Suggested Gate Run (Local)
 
-1. `gofmt -w sdk/cliproxy/service.go sdk/cliproxy/service_openai_compat_thinking_test.go`
-2. `go test ./sdk/cliproxy -run 'TestOpenAICompat.*Thinking|TestOpenAICompat.*DeepSeek|TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh'`
-3. `go test ./internal/watcher/diff -run TestComputeOpenAICompatModelsHash_ThinkingChangesHash`
-4. `go test ./sdk/cliproxy ./internal/thinking ./internal/watcher/diff`
-5. `go test ./test -run TestThinking`
-6. `go test ./...`
-7. `go build -o test-output ./cmd/server && rm test-output`
+1. `gofmt -w <changed-go-files>` - required after Go edits.
+2. `go test ./...` - validates package and cross-module regressions.
+3. `go build -o test-output ./cmd/server && rm test-output` - mirrors PR build gate.
+4. `git diff --name-only -- internal/translator` - confirm protected path is untouched.
 
-## Results
+## Actual Gate Results
 
-- PASS: `gofmt -w sdk/cliproxy/service.go sdk/cliproxy/service_openai_compat_thinking_test.go`
-- PASS: `go test ./sdk/cliproxy -run 'TestOpenAICompat.*Thinking|TestOpenAICompat.*DeepSeek|TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh'`
-- PASS: `go test ./internal/watcher/diff -run TestComputeOpenAICompatModelsHash_ThinkingChangesHash`
-- PASS: `go test ./sdk/cliproxy ./internal/thinking ./internal/watcher/diff`
-- PASS: `go test ./test -run TestThinking`
-- PASS: `go test ./...`
-- PASS: `go build -o test-output ./cmd/server && rm test-output`
+- `gofmt -w ...`: passed.
+- `go test ./internal/redisqueue ./internal/api/handlers/management ./sdk/cliproxy/auth ./sdk/cliproxy/usage ./internal/usage`: passed.
+- `go test ./...`: passed.
+- `go build -o test-output ./cmd/server && rm test-output`: passed.
+- `git status --short` shows no `internal/translator/**` changes.
 
 ## Final Self-Review
 
-- Security & secrets: no secret-bearing `config.yaml` edits.
-- Edge cases & error handling: explicit per-model thinking remains authoritative; prefixed models are covered.
-- Backward compatibility / migrations: no data or schema migrations.
-- API/contract compatibility: only prevents proxy-side over-clamping for compatible upstreams.
-- Observability: existing thinking debug logs still apply.
-- Config/env changes: no new fields; example comment updated.
-- Performance risk: negligible; metadata resolution runs during model registration.
-- Rollback plan: revert touched code/docs or explicitly restrict a model's `thinking.levels`.
+- Security & secrets: no secrets committed; `CPA_MANAGEMENT_KEY` is documented as operator-provided env/config.
+- Edge cases & error handling: invalid usage queue count returns 400 without popping; disabled management clears queue.
+- Backward compatibility / migrations: no schema migration; panel repository override remains supported.
+- API/contract compatibility: new management endpoints are under existing auth middleware.
+- Observability: config diff reports retention changes; queue data is available through management API.
+- Config/env changes: `redis-usage-queue-retention-seconds`, `CPA_MANAGER_CPA_URL`, `CPA_MANAGEMENT_KEY`, and `TAILSCALE_CPA_MANAGER_PORT` are documented.
+- Performance risk: queue is in-memory, bounded by retention time, and only active when management is enabled.
+- Rollback plan: revert this change and stop/remove the external CPA-Manager service.
 
 ## PR-ready checklist
 
-- [x] `gofmt -w sdk/cliproxy/service.go sdk/cliproxy/service_openai_compat_thinking_test.go`
-- [x] `go test ./sdk/cliproxy -run 'TestOpenAICompat.*Thinking|TestOpenAICompat.*DeepSeek|TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh'`
-- [x] `go test ./internal/watcher/diff -run TestComputeOpenAICompatModelsHash_ThinkingChangesHash`
-- [x] `go test ./sdk/cliproxy ./internal/thinking ./internal/watcher/diff`
-- [x] `go test ./test -run TestThinking`
+- [x] `gofmt -w <changed-go-files>`
 - [x] `go test ./...`
 - [x] `go build -o test-output ./cmd/server && rm test-output`
-- [x] Confirm no `internal/translator/**` changes.
+- [x] Protected translator path check: no `internal/translator/**` changes.

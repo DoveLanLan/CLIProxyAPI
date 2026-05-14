@@ -28,6 +28,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
@@ -262,6 +263,9 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	managementasset.SetCurrentConfig(cfg)
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
+	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
 	applySignatureCacheConfig(nil, cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
@@ -299,6 +303,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// or when a local management password is provided (e.g. TUI mode).
 	hasManagementSecret := cfg.RemoteManagement.SecretKey != "" || envManagementSecret || s.localPassword != ""
 	s.managementRoutesEnabled.Store(hasManagementSecret)
+	redisqueue.SetEnabled(hasManagementSecret)
 	if hasManagementSecret {
 		s.registerManagementRoutes()
 	}
@@ -543,6 +548,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/api-keys", s.mgmt.PutAPIKeys)
 		mgmt.PATCH("/api-keys", s.mgmt.PatchAPIKeys)
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
+		mgmt.GET("/api-key-usage", s.mgmt.GetAPIKeyUsage)
+		mgmt.GET("/usage-queue", s.mgmt.GetUsageQueue)
 
 		mgmt.GET("/gemini-api-key", s.mgmt.GetGeminiKeys)
 		mgmt.PUT("/gemini-api-key", s.mgmt.PutGeminiKeys)
@@ -909,6 +916,11 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 
 	if oldCfg == nil || oldCfg.UsageStatisticsEnabled != cfg.UsageStatisticsEnabled {
 		usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
+		redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	}
+
+	if oldCfg == nil || oldCfg.RedisUsageQueueRetentionSeconds != cfg.RedisUsageQueueRetentionSeconds {
+		redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
 	}
 
 	if s.requestLogger != nil && (oldCfg == nil || oldCfg.ErrorLogsMaxFiles != cfg.ErrorLogsMaxFiles) {
@@ -963,6 +975,7 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 			s.managementRoutesEnabled.Store(!newSecretEmpty)
 		}
 	}
+	redisqueue.SetEnabled(s.managementRoutesEnabled.Load())
 
 	s.applyAccessConfig(oldCfg, cfg)
 	s.cfg = cfg

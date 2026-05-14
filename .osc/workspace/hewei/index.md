@@ -9,3 +9,4 @@
 - journal-5.md — Remote split-proxy validation complete
 - journal-6.md — Add GPT-5.5 Codex model support
 - journal-7.md — Fix Codex OAuth invalidated token failover
+- journal-8.md — Integrate CPA-Manager panel and usage monitoring

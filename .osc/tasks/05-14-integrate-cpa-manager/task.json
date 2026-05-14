@@ -1,0 +1,14 @@
+{
+  "name": "Integrate CPA-Manager panel and usage monitoring",
+  "type": "feature",
+  "branch": "task/integrate-cpa-manager",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-05-14T08:10:21Z"
+}

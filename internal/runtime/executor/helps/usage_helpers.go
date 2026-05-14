@@ -18,8 +18,10 @@ import (
 type UsageReporter struct {
 	provider    string
 	model       string
+	alias       string
 	authID      string
 	authIndex   string
+	authType    string
 	apiKey      string
 	source      string
 	requestedAt time.Time
@@ -28,12 +30,18 @@ type UsageReporter struct {
 
 func NewUsageReporter(ctx context.Context, provider, model string, auth *cliproxyauth.Auth) *UsageReporter {
 	apiKey := APIKeyFromContext(ctx)
+	alias := usage.RequestedModelAliasFromContext(ctx)
+	if alias == "" {
+		alias = model
+	}
 	reporter := &UsageReporter{
 		provider:    provider,
 		model:       model,
+		alias:       strings.TrimSpace(alias),
 		requestedAt: time.Now(),
 		apiKey:      apiKey,
 		source:      resolveUsageSource(auth, apiKey),
+		authType:    resolveUsageAuthType(auth),
 	}
 	if auth != nil {
 		reporter.authID = auth.ID
@@ -94,10 +102,12 @@ func (r *UsageReporter) buildRecord(detail usage.Detail, failed bool) usage.Reco
 	return usage.Record{
 		Provider:    r.provider,
 		Model:       r.model,
+		Alias:       r.alias,
 		Source:      r.source,
 		APIKey:      r.apiKey,
 		AuthID:      r.authID,
 		AuthIndex:   r.authIndex,
+		AuthType:    r.authType,
 		RequestedAt: r.requestedAt,
 		Latency:     r.latency(),
 		Failed:      failed,
@@ -179,6 +189,18 @@ func resolveUsageSource(auth *cliproxyauth.Auth, ctxAPIKey string) string {
 		return trimmed
 	}
 	return ""
+}
+
+func resolveUsageAuthType(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	kind, _ := auth.AccountInfo()
+	kind = strings.TrimSpace(kind)
+	if kind == "api_key" {
+		return "apikey"
+	}
+	return kind
 }
 
 func ParseCodexUsage(data []byte) (usage.Detail, bool) {

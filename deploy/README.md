@@ -13,6 +13,7 @@ Additional guide:
 - The shared gateway proxies `api.heweili.top` to the `cli-proxy-api` container on the `vps-gateway` Docker network.
 - The management UI and `/v0/management` stay off the public domain.
 - Management access is exposed separately on the Tailscale IP and a dedicated host port.
+- CPA-Manager Usage Service is exposed separately on the Tailscale IP for persistent request monitoring.
 
 ## Server Layout
 
@@ -26,6 +27,7 @@ Recommended root on the VPS:
   data/config.yaml
   data/auths/
   data/logs/
+  data/cpa-manager/
   data/logs/split-proxy/
   split-proxy/start.sh
   scripts/remote-deploy.sh
@@ -45,11 +47,14 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `GATEWAY_CONTAINER` to the gateway nginx container, usually `vps-gateway-nginx`
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
+   - `TAILSCALE_CPA_MANAGER_PORT` to the private CPA-Manager Usage Service port
+   - `CPA_MANAGEMENT_KEY` to the plaintext Management Key used by CPA and CPA-Manager
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
    - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` only when split-proxy is enabled
 3. Create `data/config.yaml` on the VPS.
 4. Create `data/auths/` and place any existing auth files there if needed.
 5. Ensure `data/logs/` exists and is writable.
+   Ensure `data/cpa-manager/` exists and is writable for CPA-Manager SQLite data.
    When split-proxy is enabled, `data/logs/split-proxy/` will be used for Squid logs.
 6. Ensure the shared gateway stack exists and mounts the certificate directory expected by `api.heweili.top.conf`.
 
@@ -98,6 +103,10 @@ remote-management:
   allow-remote: true
   secret-key: "set-a-strong-management-secret"
   disable-control-panel: false
+  panel-github-repository: "https://github.com/seakee/CPA-Manager"
+
+usage-statistics-enabled: true
+redis-usage-queue-retention-seconds: 60
 ```
 
 Recommended access URLs from a device already connected to the same tailnet:
@@ -105,11 +114,17 @@ Recommended access URLs from a device already connected to the same tailnet:
 - `http://100.67.99.9:18317/management.html#/`
 - `http://t7y08hlk8c.tail3ae13e.ts.net:18317/management.html#/`
 
+CPA-Manager Usage Service is available on a separate private port:
+
+- `http://100.67.99.9:18318/management.html#/`
+- `http://t7y08hlk8c.tail3ae13e.ts.net:18318/management.html#/`
+
 Notes:
 
 - Keep the public Nginx rule blocking `/management.html` and `/v0/management`.
 - The Tailscale access path is plain HTTP on the private tailnet, not HTTPS through Cloudflare.
 - The management API still requires the configured management secret.
+- Run only one CPA-Manager Usage Service per CPA instance because it drains `/v0/management/usage-queue`.
 
 ## GHCR Notes
 
@@ -141,5 +156,8 @@ Use one of these private-access methods instead:
 - Tailscale: `http://100.67.99.9:18317/management.html#/`
 - MagicDNS/Tailnet hostname: `http://t7y08hlk8c.tail3ae13e.ts.net:18317/management.html#/`
 - SSH tunnel fallback: `ssh -L 8317:127.0.0.1:8317 root@23.175.201.12`
+
+For persistent request monitoring, open CPA-Manager Usage Service on the private port configured by
+`TAILSCALE_CPA_MANAGER_PORT` and configure the CPA-hosted panel to use that Usage Service URL.
 
 This keeps `/management.html` and `/v0/management` off the public internet while still allowing operator access.
