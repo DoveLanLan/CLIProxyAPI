@@ -1,0 +1,13 @@
+{
+  "name": "Ignore null OpenAI stream usage chunks",
+  "type": "bugfix",
+  "branch": "task/openai-stream-usage-null",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [],
+  "status": "planned",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "pending"
+}
