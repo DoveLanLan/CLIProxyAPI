@@ -1,7 +1,6 @@
 package synthesizer
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,9 +8,8 @@ import (
 	"testing"
 	"time"
 
-	codexauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/codex"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 func TestNewFileSynthesizer(t *testing.T) {
@@ -165,105 +163,6 @@ func TestFileSynthesizer_Synthesize_GeminiProviderMapping(t *testing.T) {
 
 	if auths[0].Provider != "gemini-cli" {
 		t.Errorf("gemini should be mapped to gemini-cli, got %s", auths[0].Provider)
-	}
-}
-
-func TestFileSynthesizer_CodexTeamSameAccountDistinctUsers(t *testing.T) {
-	tempDir := t.TempDir()
-
-	teamAccountID := "chatgpt-team-account"
-	userAID := "chatgpt-user-a"
-	userBID := "chatgpt-user-b"
-	emailA := "user-a@example.com"
-	emailB := "user-b@example.com"
-	accountHash := codexauth.HashIdentityValue(teamAccountID)
-
-	authFiles := []struct {
-		email  string
-		userID string
-	}{
-		{email: emailA, userID: userAID},
-		{email: emailB, userID: userBID},
-	}
-
-	for _, file := range authFiles {
-		idToken := fakeCodexIDToken(t, file.email, teamAccountID, file.userID, "team")
-		authData := map[string]any{
-			"type":          "codex",
-			"email":         file.email,
-			"account_id":    teamAccountID,
-			"id_token":      idToken,
-			"access_token":  "access-token",
-			"refresh_token": "refresh-token",
-		}
-		data, errMarshal := json.Marshal(authData)
-		if errMarshal != nil {
-			t.Fatalf("marshal auth data: %v", errMarshal)
-		}
-		name := codexauth.CredentialFileName(file.email, "team", accountHash, true)
-		if errWrite := os.WriteFile(filepath.Join(tempDir, name), data, 0o600); errWrite != nil {
-			t.Fatalf("write auth file: %v", errWrite)
-		}
-	}
-
-	synth := NewFileSynthesizer()
-	ctx := &SynthesisContext{
-		Config:      &config.Config{},
-		AuthDir:     tempDir,
-		Now:         time.Now(),
-		IDGenerator: NewStableIDGenerator(),
-	}
-
-	auths, err := synth.Synthesize(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(auths) != 2 {
-		t.Fatalf("expected 2 auths, got %d", len(auths))
-	}
-
-	byEmail := make(map[string]*coreauth.Auth, len(auths))
-	for _, auth := range auths {
-		if auth.Disabled {
-			t.Fatalf("expected %s to be active", auth.ID)
-		}
-		if auth.Status != coreauth.StatusActive {
-			t.Fatalf("expected %s status active, got %s", auth.ID, auth.Status)
-		}
-		byEmail[auth.Attributes["email"]] = auth
-	}
-
-	authA := byEmail[emailA]
-	authB := byEmail[emailB]
-	if authA == nil || authB == nil {
-		t.Fatalf("expected auths for %s and %s, got %#v", emailA, emailB, byEmail)
-	}
-	if authA.ID == authB.ID {
-		t.Fatalf("expected distinct auth IDs, both were %q", authA.ID)
-	}
-	if got := authA.Attributes["chatgpt_account_id"]; got != teamAccountID {
-		t.Fatalf("authA chatgpt_account_id = %q, want %q", got, teamAccountID)
-	}
-	if got := authB.Attributes["chatgpt_account_id"]; got != teamAccountID {
-		t.Fatalf("authB chatgpt_account_id = %q, want %q", got, teamAccountID)
-	}
-	if got := authA.Attributes["chatgpt_user_id"]; got != userAID {
-		t.Fatalf("authA chatgpt_user_id = %q, want %q", got, userAID)
-	}
-	if got := authB.Attributes["chatgpt_user_id"]; got != userBID {
-		t.Fatalf("authB chatgpt_user_id = %q, want %q", got, userBID)
-	}
-	if authA.Attributes["codex_account_hash"] != accountHash || authB.Attributes["codex_account_hash"] != accountHash {
-		t.Fatalf("expected both auths to share account hash %q, got %q and %q", accountHash, authA.Attributes["codex_account_hash"], authB.Attributes["codex_account_hash"])
-	}
-	if authA.Attributes["codex_user_hash"] == "" || authA.Attributes["codex_user_hash"] == authB.Attributes["codex_user_hash"] {
-		t.Fatalf("expected distinct non-empty user hashes, got %q and %q", authA.Attributes["codex_user_hash"], authB.Attributes["codex_user_hash"])
-	}
-	if got := authA.Attributes["plan_type"]; got != "team" {
-		t.Fatalf("authA plan_type = %q, want team", got)
-	}
-	if got := authA.Metadata["chatgpt_user_id"]; got != userAID {
-		t.Fatalf("authA metadata chatgpt_user_id = %v, want %q", got, userAID)
 	}
 }
 
@@ -1055,26 +954,4 @@ func TestFileSynthesizer_Synthesize_MultiProjectGeminiWithNote(t *testing.T) {
 			t.Errorf("expected virtual %d priority %q, got %q", i, "5", gotPriority)
 		}
 	}
-}
-
-func fakeCodexIDToken(t *testing.T, email, accountID, userID, planType string) string {
-	t.Helper()
-	header, errMarshalHeader := json.Marshal(map[string]any{"alg": "none"})
-	if errMarshalHeader != nil {
-		t.Fatalf("marshal jwt header: %v", errMarshalHeader)
-	}
-	payload, errMarshalPayload := json.Marshal(map[string]any{
-		"email": email,
-		"sub":   userID,
-		"https://api.openai.com/auth": map[string]any{
-			"chatgpt_account_id": accountID,
-			"chatgpt_user_id":    userID,
-			"chatgpt_plan_type":  planType,
-		},
-	})
-	if errMarshalPayload != nil {
-		t.Fatalf("marshal jwt payload: %v", errMarshalPayload)
-	}
-	return base64.RawURLEncoding.EncodeToString(header) + "." +
-		base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 }

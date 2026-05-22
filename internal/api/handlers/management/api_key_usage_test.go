@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 func sumRecentRequestBuckets(buckets []coreauth.RecentRequestBucket) (int64, int64) {
@@ -22,7 +22,7 @@ func sumRecentRequestBuckets(buckets []coreauth.RecentRequestBucket) (int64, int
 	return success, failed
 }
 
-func TestGetAPIKeyUsageGroupsByProviderAndAPIKey(t *testing.T) {
+func TestGetAPIKeyUsage_GroupsByProviderAndAPIKey(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 	gin.SetMode(gin.TestMode)
 
@@ -56,7 +56,8 @@ func TestGetAPIKeyUsageGroupsByProviderAndAPIKey(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(rec)
-	ginCtx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/api-key-usage", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v0/management/api-key-usage", nil)
+	ginCtx.Request = req
 	h.GetAPIKeyUsage(ginCtx)
 
 	if rec.Code != http.StatusOK {
@@ -77,7 +78,7 @@ func TestGetAPIKeyUsageGroupsByProviderAndAPIKey(t *testing.T) {
 	}
 	codexSuccess, codexFailed := sumRecentRequestBuckets(codexEntry.RecentRequests)
 	if codexSuccess != 1 || codexFailed != 1 {
-		t.Fatalf("codex bucket totals = %d/%d, want 1/1", codexSuccess, codexFailed)
+		t.Fatalf("codex totals = %d/%d, want 1/1", codexSuccess, codexFailed)
 	}
 
 	claudeEntry := payload["claude"]["https://claude.example.com|claude-key"]
@@ -89,6 +90,6 @@ func TestGetAPIKeyUsageGroupsByProviderAndAPIKey(t *testing.T) {
 	}
 	claudeSuccess, claudeFailed := sumRecentRequestBuckets(claudeEntry.RecentRequests)
 	if claudeSuccess != 1 || claudeFailed != 0 {
-		t.Fatalf("claude bucket totals = %d/%d, want 1/0", claudeSuccess, claudeFailed)
+		t.Fatalf("claude totals = %d/%d, want 1/0", claudeSuccess, claudeFailed)
 	}
 }

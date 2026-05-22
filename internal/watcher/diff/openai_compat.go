@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
 // DiffOpenAICompatibility produces human-readable change descriptions.
@@ -65,16 +65,15 @@ func describeOpenAICompatibilityUpdate(oldEntry, newEntry config.OpenAICompatibi
 	newKeyCount := countAPIKeys(newEntry)
 	oldModelCount := countOpenAIModels(oldEntry.Models)
 	newModelCount := countOpenAIModels(newEntry.Models)
-	oldModelsHash := ComputeOpenAICompatModelsHash(oldEntry.Models)
-	newModelsHash := ComputeOpenAICompatModelsHash(newEntry.Models)
 	details := make([]string, 0, 3)
+	if oldEntry.Disabled != newEntry.Disabled {
+		details = append(details, fmt.Sprintf("disabled %t -> %t", oldEntry.Disabled, newEntry.Disabled))
+	}
 	if oldKeyCount != newKeyCount {
 		details = append(details, fmt.Sprintf("api-keys %d -> %d", oldKeyCount, newKeyCount))
 	}
 	if oldModelCount != newModelCount {
 		details = append(details, fmt.Sprintf("models %d -> %d", oldModelCount, newModelCount))
-	} else if oldModelsHash != newModelsHash {
-		details = append(details, "model metadata updated")
 	}
 	if !equalStringMap(oldEntry.Headers, newEntry.Headers) {
 		details = append(details, "headers updated")
@@ -149,11 +148,12 @@ func openAICompatSignature(entry config.OpenAICompatibility) string {
 
 	models := make([]string, 0, len(entry.Models))
 	for _, model := range entry.Models {
-		key := openAICompatModelKey(model)
-		if key == "" {
+		name := strings.TrimSpace(model.Name)
+		alias := strings.TrimSpace(model.Alias)
+		if name == "" && alias == "" {
 			continue
 		}
-		models = append(models, key)
+		models = append(models, strings.ToLower(name)+"|"+strings.ToLower(alias)+"|"+fmt.Sprintf("image=%t", model.Image))
 	}
 	if len(models) > 0 {
 		sort.Strings(models)

@@ -15,8 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/auth/codex"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 // FileTokenStore persists token records and auth metadata using the filesystem as backing storage.
@@ -73,6 +72,10 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 
 	switch {
 	case auth.Storage != nil:
+		if auth.Metadata == nil {
+			auth.Metadata = make(map[string]any)
+		}
+		auth.Metadata["disabled"] = auth.Disabled
 		if setter, ok := auth.Storage.(metadataSetter); ok {
 			setter.SetMetadata(auth.Metadata)
 		}
@@ -238,19 +241,12 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 	if disabled {
 		status = cliproxyauth.StatusDisabled
 	}
-	statusMessage := ""
-	if disabled {
-		if disabledReason, okReason := metadata["disabled_reason"].(string); okReason {
-			statusMessage = strings.TrimSpace(disabledReason)
-		}
-	}
 	auth := &cliproxyauth.Auth{
 		ID:               id,
 		Provider:         provider,
 		FileName:         id,
 		Label:            s.labelFor(metadata),
 		Status:           status,
-		StatusMessage:    statusMessage,
 		Disabled:         disabled,
 		Attributes:       map[string]string{"path": path},
 		Metadata:         metadata,
@@ -261,19 +257,6 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 	}
 	if email, ok := metadata["email"].(string); ok && email != "" {
 		auth.Attributes["email"] = email
-	}
-	if provider == "codex" {
-		for _, key := range []string{"chatgpt_account_id", "chatgpt_user_id", "codex_account_hash", "codex_user_hash", "plan_type"} {
-			if value, okValue := metadata[key].(string); okValue && strings.TrimSpace(value) != "" {
-				auth.Attributes[key] = strings.TrimSpace(value)
-			}
-		}
-		if idTokenRaw, okToken := metadata["id_token"].(string); okToken && strings.TrimSpace(idTokenRaw) != "" {
-			email, _ := metadata["email"].(string)
-			identity := codex.ExtractIdentityMetadata(idTokenRaw, email)
-			identity.ApplyToMetadata(metadata)
-			identity.ApplyToAttributes(auth.Attributes)
-		}
 	}
 	cliproxyauth.ApplyCustomHeadersFromMetadata(auth)
 	return auth, nil

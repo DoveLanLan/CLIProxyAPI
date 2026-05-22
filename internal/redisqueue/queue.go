@@ -9,6 +9,7 @@ import (
 const (
 	defaultRetentionSeconds int64 = 60
 	maxRetentionSeconds     int64 = 3600
+	usageSubscriberBuffer         = 256
 )
 
 type queueItem struct {
@@ -17,9 +18,11 @@ type queueItem struct {
 }
 
 type queue struct {
-	mu    sync.Mutex
-	items []queueItem
-	head  int
+	mu               sync.Mutex
+	items            []queueItem
+	head             int
+	subscribers      map[uint64]chan []byte
+	nextSubscriberID uint64
 }
 
 var (
@@ -54,24 +57,47 @@ func SetRetentionSeconds(value int) {
 }
 
 func Enqueue(payload []byte) {
-	if !Enabled() || len(payload) == 0 {
+	if !Enabled() {
+		return
+	}
+	if len(payload) == 0 {
+		return
+	}
+	if global.publishToSubscribers(payload) {
 		return
 	}
 	global.enqueue(payload)
 }
 
 func PopOldest(count int) [][]byte {
-	if !Enabled() || count <= 0 {
+	if !Enabled() {
+		return nil
+	}
+	if count <= 0 {
 		return nil
 	}
 	return global.popOldest(count)
 }
 
+func SubscribeUsage() (<-chan []byte, func()) {
+	return global.subscribeUsage()
+}
+
 func (q *queue) clear() {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+
+	subscribers := make([]chan []byte, 0, len(q.subscribers))
+	for _, subscriber := range q.subscribers {
+		subscribers = append(subscribers, subscriber)
+	}
 	q.items = nil
 	q.head = 0
+	q.subscribers = nil
+	q.mu.Unlock()
+
+	for _, subscriber := range subscribers {
+		close(subscriber)
+	}
 }
 
 func (q *queue) enqueue(payload []byte) {
@@ -86,6 +112,61 @@ func (q *queue) enqueue(payload []byte) {
 		payload:    append([]byte(nil), payload...),
 	})
 	q.maybeCompactLocked()
+}
+
+func (q *queue) publishToSubscribers(payload []byte) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.subscribers) == 0 {
+		return false
+	}
+
+	for id, subscriber := range q.subscribers {
+		cloned := append([]byte(nil), payload...)
+		select {
+		case subscriber <- cloned:
+		default:
+			delete(q.subscribers, id)
+			close(subscriber)
+		}
+	}
+
+	return true
+}
+
+func (q *queue) subscribeUsage() (<-chan []byte, func()) {
+	subscriber := make(chan []byte, usageSubscriberBuffer)
+
+	q.mu.Lock()
+	if q.subscribers == nil {
+		q.subscribers = make(map[uint64]chan []byte)
+	}
+	q.nextSubscriberID++
+	id := q.nextSubscriberID
+	q.subscribers[id] = subscriber
+	q.mu.Unlock()
+
+	var once sync.Once
+	unsubscribe := func() {
+		once.Do(func() {
+			q.unsubscribeUsage(id)
+		})
+	}
+	return subscriber, unsubscribe
+}
+
+func (q *queue) unsubscribeUsage(id uint64) {
+	q.mu.Lock()
+	subscriber, ok := q.subscribers[id]
+	if ok {
+		delete(q.subscribers, id)
+	}
+	q.mu.Unlock()
+
+	if ok {
+		close(subscriber)
+	}
 }
 
 func (q *queue) popOldest(count int) [][]byte {
@@ -108,7 +189,7 @@ func (q *queue) popOldest(count int) [][]byte {
 	out := make([][]byte, 0, count)
 	for i := 0; i < count; i++ {
 		item := q.items[q.head+i]
-		out = append(out, append([]byte(nil), item.payload...))
+		out = append(out, item.payload)
 	}
 	q.head += count
 	q.maybeCompactLocked()

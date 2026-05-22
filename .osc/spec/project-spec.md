@@ -22,8 +22,8 @@ This repository is not a conventional browser frontend project. The interactive 
 
 - Repo root: `/Volumes/DevDrive/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
-- Current task: `.osc/tasks/04-21-shared-vps-gateway`
-- Immediate implication: deployment changes should update that task's `changes/` artifacts before non-`.osc/` edits.
+- Current task: `.osc/tasks/05-22-merge-upstream-non-docker-changes`
+- Immediate implication: this upstream sync must update that task's `changes/` artifacts before non-`.osc/` edits.
 
 **Repo Snapshot**
 - **Modules/Components:** `cmd/server` is the runnable server entrypoint; `internal/{api,auth,cmd,config,logging,managementasset,runtime,store,tui,usage,watcher,wsrelay,...}` contains server-only runtime code; `sdk/{api,auth,cliproxy,config,logging,translator}` is the reusable embedding surface; `docs/`, `examples/`, and `test/` hold consumer docs, samples, and regression coverage. (confidence: High) — evidence: `README.md`, `cmd/server/main.go`, `internal/`, `sdk/`, `docs/`, `examples/`, `test/`
@@ -109,7 +109,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 ### Top 7 Constraints
 
-- Constraint 1: Current source changes should stay within `.osc/tasks/04-21-shared-vps-gateway` unless a new task is selected.
+- Constraint 1: Current source changes should stay within `.osc/tasks/05-22-merge-upstream-non-docker-changes` unless a new task is selected.
 - Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist or are updated, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
 - Constraint 3: Required repo artifacts do not live only in chat: baseline rules go in `.osc/spec/project-spec.md`, task change packages go in `.osc/tasks/<task-dir>/changes/`, and quality results go in `.osc/quality-gate.md`.
 - Constraint 4: This repository is primarily a Go proxy/server and embeddable SDK, not a bundled browser frontend. UI work in-tree normally means Bubble Tea TUI work or management asset integration.
