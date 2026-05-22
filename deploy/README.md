@@ -49,6 +49,7 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
    - `TAILSCALE_CPA_MANAGER_PORT` to the private CPA-Manager Usage Service port
    - `CPA_MANAGEMENT_KEY` to the plaintext Management Key used by CPA and CPA-Manager
+   - `CPA_MANAGER_USAGE_QUERY_LIMIT` to the number of recent usage events CPA-Manager loads per dashboard request
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
    - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` only when split-proxy is enabled
 3. Create `data/config.yaml` on the VPS.
@@ -125,6 +126,7 @@ Notes:
 - The Tailscale access path is plain HTTP on the private tailnet, not HTTPS through Cloudflare.
 - The management API still requires the configured management secret.
 - Run only one CPA-Manager Usage Service per CPA instance because it drains `/v0/management/usage-queue`.
+- CPA-Manager defaults to `CPA_MANAGER_USAGE_QUERY_LIMIT=1000` in this compose file so the monitoring page does not block on a full SQLite history scan. If `/v0/management/usage` still times out or the page remains on `Loading`, lower it to `200` or `100` in `/opt/cliproxyapi/.env` and restart only the `cpa-manager` service. Set it back to `50000` only when you explicitly need a larger historical window and the service can return it quickly.
 
 ## GHCR Notes
 

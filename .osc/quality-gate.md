@@ -1,79 +1,60 @@
-# Quality Gate: Merge Upstream Non-Docker Changes
+# Quality Gate: Fix CPA-Manager Monitoring Load
 
 ## Assumptions
 
-- The change scope is a broad upstream sync from `router-for-me/CLIProxyAPI` `upstream/main`.
-- `.github` and Docker-related files are intentionally excluded from the merge.
-- Translator changes are allowed here because the task is not translator-only and the upstream sync spans runtime, SDK, registry, API, and tests.
+- The code change is deployment/documentation only.
+- No Go source files, generated assets, `.github` workflows, Docker build files, or `internal/translator/**` paths are intentionally touched.
+- The VPS deploy path uses `deploy/compose.production.yml` or a compatible compose environment.
 
 ## Suspected Change Scope
 
-- Server/runtime: `cmd/server`, `internal/api`, `internal/auth`, `internal/runtime`, `internal/home`, `internal/store`, `internal/watcher`.
-- SDK/API: `sdk/api`, `sdk/auth`, `sdk/cliproxy`, `sdk/translator`.
-- Registry/thinking/translators: `internal/registry`, `internal/thinking`, `internal/translator`.
-- Docs/examples/assets/module metadata: `README*`, `examples/`, `assets/`, `go.mod`, `go.sum`, `config.example.yaml`.
+- Deployment: `deploy/compose.production.yml`
+- Documentation: `deploy/README.md`
+- Workflow artifacts: `.osc/tasks/05-22-fix-cpa-manager-monitoring-load/changes/*`
 
 ## Detected Gates
 
-- Gate Name: Go format
+- Gate Name: Compose config render
   - Confidence: High
-  - Evidence: `AGENTS.md` requires `gofmt -w .` after Go changes.
-- Gate Name: Go tests
+  - Evidence: `deploy/compose.production.yml` defines the affected service and environment variables.
+- Gate Name: Deployment documentation review
   - Confidence: High
-  - Evidence: `AGENTS.md` lists `go test ./...`; repository has package and cross-module `*_test.go` coverage.
+  - Evidence: `deploy/README.md` documents the VPS environment variables and CPA-Manager access notes.
 - Gate Name: Go build
+  - Confidence: Low for this change
+  - Evidence: `AGENTS.md` requires `go build -o test-output ./cmd/server && rm test-output` after code changes; no Go files are modified here.
+- Gate Name: Protected path review
   - Confidence: High
-  - Evidence: `AGENTS.md` requires `go build -o test-output ./cmd/server && rm test-output`; project spec mirrors PR build gate.
-- Gate Name: Conflict/exclusion checks
-  - Confidence: High
-  - Evidence: task spec excludes `.github` and Docker-related paths and requires no conflict markers.
-- Gate Name: Translator path review
-  - Confidence: High
-  - Evidence: `AGENTS.md` marks `internal/translator/**` as protected unless part of broader changes.
+  - Evidence: `AGENTS.md` and project spec protect `internal/translator/**`; user also requested not to touch `.github` or Docker build-related files in the upstream sync context.
 
 ## Suggested Gate Run (Local)
 
-1. `gofmt` on changed Go files - required after Go edits.
-2. `git diff --check` - catches whitespace/conflict formatting issues.
-3. `git diff --name-only --diff-filter=U` and `rg -n '^(<<<<<<<|=======|>>>>>>>)' -S . --glob '!logs/**' --glob '!auths/**' --glob '!tmp/**'` - verify conflict resolution.
-4. `git status --short -- .github Dockerfile .dockerignore docker-build.sh docker-build.ps1 'docker-compose*.yml' .env.cluster.example` - verify excluded files remain unchanged.
-5. `go test ./...` - validates package and cross-module regressions.
-6. `go build -o test-output ./cmd/server && rm test-output` - required server compile gate.
-7. `git diff --cached --name-only -- internal/translator` - review translator scope as part of broad upstream sync.
+1. `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config` - verify compose renders and `USAGE_QUERY_LIMIT` expands.
+2. `git diff --name-only` - verify only intended deployment/docs/workflow paths changed.
+3. `git diff --check` - verify no whitespace or patch formatting issues.
+4. `go build -o test-output ./cmd/server && rm test-output` - optional for this deployment-only task, required before merging if repository policy treats any non-doc change as needing a server build.
 
 ## Actual Gate Results
 
-- PASS: `gofmt` on changed Go files.
+- PASS: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config` rendered successfully and included `USAGE_QUERY_LIMIT: "1000"`.
+- PASS: `git diff --name-only` showed only `.osc/quality-gate.md`, `deploy/README.md`, and `deploy/compose.production.yml` among tracked changes.
 - PASS: `git diff --check`.
-- PASS: `git diff --name-only --diff-filter=U`.
-- PASS: `rg -n '^(<<<<<<<|=======|>>>>>>>)' -S . --glob '!logs/**' --glob '!auths/**' --glob '!tmp/**'`.
-- PASS: `git status --short -- .github Dockerfile .dockerignore docker-build.sh docker-build.ps1 'docker-compose*.yml' .env.cluster.example`.
-- PASS: `go test ./sdk/cliproxy/auth -run TestManager_CodexInvalidatedOAuthTokenDisablesAndFallsBackWithMaxRetryOne -v`.
-- PASS: `go test ./sdk/cliproxy/auth`.
-- PASS: `go test ./...`.
 - PASS: `go build -o test-output ./cmd/server && rm test-output`.
-- REVIEWED: `git diff --cached --name-only -- internal/translator` shows 92 translator files, accepted as part of the broad upstream sync.
 
 ## Final Self-Review
 
-- Security & secrets: no auth material, logs, or runtime `config.yaml` were edited; no secrets were added.
-- Edge cases & error handling: preserved local Codex invalidated OAuth token disable-and-fallback behavior with focused regression coverage.
-- Backward compatibility / migrations: upstream upgrades the Go module to `/v7`; no database or storage migration was introduced.
-- API/contract compatibility: upstream API/SDK surface was accepted broadly; local CPA-Manager defaults and OpenAI-compatible thinking behavior were preserved.
-- Observability: upstream logging/usage changes were included; secret masking expectations are still covered by tests.
-- Config/env changes: upstream config example changes were merged except Docker-related files; existing local runtime config was untouched.
-- Performance risk: broad runtime changes are covered by tests/build, but production rollout should still be staged.
-- Rollback plan: revert the upstream-sync commit or discard the squash merge before commit; no separate data rollback is required.
+- Security & secrets: no management key, Authorization header, auth file, or local `config.yaml` value was committed.
+- Edge cases & error handling: docs cover lowering the limit further if recent rows still make `/v0/management/usage` time out.
+- Backward compatibility / migrations: existing behavior can be restored with `CPA_MANAGER_USAGE_QUERY_LIMIT=50000`; no data migration.
+- API/contract compatibility: no CLIProxyAPI public API or SDK contract changed.
+- Observability: no logging changes.
+- Config/env changes: new `CPA_MANAGER_USAGE_QUERY_LIMIT` deployment variable is documented.
+- Performance risk: default query window is reduced to improve page-load latency at the cost of exhaustive historical display.
+- Rollback plan: remove `USAGE_QUERY_LIMIT` from compose or set `CPA_MANAGER_USAGE_QUERY_LIMIT=50000`, then restart `cpa-manager`.
 
 ## PR-ready checklist
 
-- [x] `gofmt` on changed Go files.
-- [x] `git diff --check`.
-- [x] `git diff --name-only --diff-filter=U`.
-- [x] `rg -n '^(<<<<<<<|=======|>>>>>>>)' -S . --glob '!logs/**' --glob '!auths/**' --glob '!tmp/**'`.
-- [x] `git status --short -- .github Dockerfile .dockerignore docker-build.sh docker-build.ps1 'docker-compose*.yml' .env.cluster.example`.
-- [x] `go test ./sdk/cliproxy/auth -run TestManager_CodexInvalidatedOAuthTokenDisablesAndFallsBackWithMaxRetryOne -v`.
-- [x] `go test ./sdk/cliproxy/auth`.
-- [x] `go test ./...`.
-- [x] `go build -o test-output ./cmd/server && rm test-output`.
-- [x] Translator scope reviewed as broad upstream sync.
+- [x] `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config`
+- [x] `git diff --name-only`
+- [x] `git diff --check`
+- [x] Optional: `go build -o test-output ./cmd/server && rm test-output`
