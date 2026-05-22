@@ -33,7 +33,7 @@
 
 ## Behavior / Requirements
 
-The workflow writes `CPA_MANAGER_IMAGE=ghcr.io/dovelanlan/cpa-manager:sha-317e9498bbefa0aa12b5e96837bfd6a7cbc8e3bc` for push-triggered execution. Manual dispatch can provide a future pinned image tag.
+The workflow writes `CPA_MANAGER_IMAGE=ghcr.io/dovelanlan/cpa-manager:sha-7fa4bfb77b917ddd02141b7fd723182cf2a47013` for push-triggered execution. Manual dispatch can provide a future pinned image tag.
 
 ## Edge Cases
 

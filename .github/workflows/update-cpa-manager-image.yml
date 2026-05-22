@@ -11,7 +11,7 @@ on:
       image:
         description: CPA-Manager image tag to write into /opt/cliproxyapi/.env
         required: true
-        default: ghcr.io/dovelanlan/cpa-manager:sha-317e9498bbefa0aa12b5e96837bfd6a7cbc8e3bc
+        default: ghcr.io/dovelanlan/cpa-manager:sha-7fa4bfb77b917ddd02141b7fd723182cf2a47013
 
 permissions:
   contents: read
@@ -25,7 +25,7 @@ env:
   DEPLOY_PORT: "22"
   DEPLOY_USER: root
   DEPLOY_ROOT: /opt/cliproxyapi
-  DEFAULT_CPA_MANAGER_IMAGE: ghcr.io/dovelanlan/cpa-manager:sha-317e9498bbefa0aa12b5e96837bfd6a7cbc8e3bc
+  DEFAULT_CPA_MANAGER_IMAGE: ghcr.io/dovelanlan/cpa-manager:sha-7fa4bfb77b917ddd02141b7fd723182cf2a47013
 
 jobs:
   update:

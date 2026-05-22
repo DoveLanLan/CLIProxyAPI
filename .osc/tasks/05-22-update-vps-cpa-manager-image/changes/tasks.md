@@ -28,4 +28,4 @@
 
 ## Notes
 
-- Target image: `ghcr.io/dovelanlan/cpa-manager:sha-317e9498bbefa0aa12b5e96837bfd6a7cbc8e3bc`.
+- Target image: `ghcr.io/dovelanlan/cpa-manager:sha-7fa4bfb77b917ddd02141b7fd723182cf2a47013`.
