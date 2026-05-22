@@ -17,7 +17,7 @@ services:
       - proxy
 
   cpa-manager:
-    image: seakee/cpa-manager:latest
+    image: ${CPA_MANAGER_IMAGE:-seakee/cpa-manager:latest}
     container_name: cpa-manager
     restart: unless-stopped
     depends_on:

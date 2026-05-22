@@ -1,60 +1,59 @@
-# Quality Gate: Fix CPA-Manager Monitoring Load
+# Quality Gate
 
-## Assumptions
+- Date: 2026-05-22
+- Scope: Make CPA-Manager image configurable for production deployment.
 
-- The code change is deployment/documentation only.
-- No Go source files, generated assets, `.github` workflows, Docker build files, or `internal/translator/**` paths are intentionally touched.
-- The VPS deploy path uses `deploy/compose.production.yml` or a compatible compose environment.
+## Assumptions:
 
-## Suspected Change Scope
+- This change is deployment-only and does not alter Go runtime behavior.
+- The VPS production stack uses `deploy/compose.production.yml`.
 
-- Deployment: `deploy/compose.production.yml`
-- Documentation: `deploy/README.md`
-- Workflow artifacts: `.osc/tasks/05-22-fix-cpa-manager-monitoring-load/changes/*`
+## Suspected Change Scope:
 
-## Detected Gates
+- `deploy/compose.production.yml`
+- `deploy/README.md`
+- `.osc/tasks/05-22-configurable-cpa-manager-image/**`
 
-- Gate Name: Compose config render
+## Detected Gates:
+
+- Gate Name: PR Go build
   - Confidence: High
-  - Evidence: `deploy/compose.production.yml` defines the affected service and environment variables.
-- Gate Name: Deployment documentation review
-  - Confidence: High
-  - Evidence: `deploy/README.md` documents the VPS environment variables and CPA-Manager access notes.
-- Gate Name: Go build
-  - Confidence: Low for this change
-  - Evidence: `AGENTS.md` requires `go build -o test-output ./cmd/server && rm test-output` after code changes; no Go files are modified here.
-- Gate Name: Protected path review
-  - Confidence: High
-  - Evidence: `AGENTS.md` and project spec protect `internal/translator/**`; user also requested not to touch `.github` or Docker build-related files in the upstream sync context.
+  - Evidence: `.github/workflows/pr-test-build.yml` job `build`, step `Build`, runs `go build -o test-output ./cmd/server`.
+- Gate Name: Docker image build/publish
+  - Confidence: Medium
+  - Evidence: `.github/workflows/docker-image.yml` job `build-and-push` builds CLIProxyAPI image on pushes to `main` and tags.
+- Gate Name: Compose render validation
+  - Confidence: Medium
+  - Evidence: deployment change is in `deploy/compose.production.yml`; previous CPA-Manager deployment task used Docker Compose config rendering as the local validation gate.
+- Gate Name: Diff whitespace check
+  - Confidence: Medium
+  - Evidence: repository convention from prior `.osc` regression checklists and safe text/YAML hygiene.
 
-## Suggested Gate Run (Local)
+## Suggested Gate Run (Local):
 
-1. `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config` - verify compose renders and `USAGE_QUERY_LIMIT` expands.
-2. `git diff --name-only` - verify only intended deployment/docs/workflow paths changed.
-3. `git diff --check` - verify no whitespace or patch formatting issues.
-4. `go build -o test-output ./cmd/server && rm test-output` - optional for this deployment-only task, required before merging if repository policy treats any non-doc change as needing a server build.
+1. `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config`
+   - Rationale: verifies the default CPA-Manager image still renders.
+2. `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test CPA_MANAGER_IMAGE=ghcr.io/example/cpa-manager:sha-test docker compose -f deploy/compose.production.yml config`
+   - Rationale: verifies the fork image override renders.
+3. `git diff --check`
+   - Rationale: catches whitespace and patch hygiene issues.
+4. `go build -o test-output ./cmd/server && rm test-output`
+   - Rationale: mirrors the PR build gate from `.github/workflows/pr-test-build.yml`.
 
-## Actual Gate Results
+## Final Self-Review:
 
-- PASS: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config` rendered successfully and included `USAGE_QUERY_LIMIT: "100"`.
-- PASS: `git diff --name-only` showed only `.osc/quality-gate.md`, `deploy/README.md`, and `deploy/compose.production.yml` among tracked changes.
-- PASS: `git diff --check`.
-- PASS: `go build -o test-output ./cmd/server && rm test-output`.
+- Security & secrets: no secrets or credentials added; image override is non-secret configuration.
+- Edge cases & error handling: invalid image values fail during Docker pull/start, with rollback by unsetting the env var.
+- Backward compatibility / migrations: default image, ports, volumes, and data paths remain unchanged; no migration.
+- API/contract compatibility: no API or CLI contracts changed.
+- Observability: not applicable for deployment image parameterization.
+- Config/env changes: added optional `CPA_MANAGER_IMAGE`; docs updated.
+- Performance risk: no runtime performance change.
+- Rollback plan: unset `CPA_MANAGER_IMAGE` or set it to `seakee/cpa-manager:latest`, then restart CPA-Manager.
 
-## Final Self-Review
+## PR-ready checklist:
 
-- Security & secrets: no management key, Authorization header, auth file, or local `config.yaml` value was committed.
-- Edge cases & error handling: docs cover lowering the limit further if recent rows still make `/v0/management/usage` time out.
-- Backward compatibility / migrations: existing behavior can be restored with `CPA_MANAGER_USAGE_QUERY_LIMIT=50000`; no data migration.
-- API/contract compatibility: no CLIProxyAPI public API or SDK contract changed.
-- Observability: no logging changes.
-- Config/env changes: new `CPA_MANAGER_USAGE_QUERY_LIMIT` deployment variable is documented.
-- Performance risk: default query window is reduced aggressively to improve page-load latency at the cost of exhaustive historical display.
-- Rollback plan: remove `USAGE_QUERY_LIMIT` from compose or set `CPA_MANAGER_USAGE_QUERY_LIMIT=50000`, then restart `cpa-manager`.
-
-## PR-ready checklist
-
-- [x] `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config`
-- [x] `git diff --name-only`
-- [x] `git diff --check`
-- [x] Optional: `go build -o test-output ./cmd/server && rm test-output`
+- [x] Default compose render: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config`
+- [x] Override compose render: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test CPA_MANAGER_IMAGE=ghcr.io/example/cpa-manager:sha-test docker compose -f deploy/compose.production.yml config`
+- [x] Diff hygiene: `git diff --check`
+- [x] Build: `go build -o test-output ./cmd/server && rm test-output`

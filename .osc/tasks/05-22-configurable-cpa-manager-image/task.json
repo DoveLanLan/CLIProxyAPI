@@ -1,0 +1,14 @@
+{
+  "name": "Make CPA-Manager image configurable",
+  "type": "config",
+  "branch": "main",
+  "priority": "P2",
+  "description": "Allow production deployments to switch CPA-Manager to a forked image without editing compose.",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-05-22T00:00:00Z"
+}

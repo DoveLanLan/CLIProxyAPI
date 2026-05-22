@@ -48,6 +48,7 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
    - `TAILSCALE_CPA_MANAGER_PORT` to the private CPA-Manager Usage Service port
+   - `CPA_MANAGER_IMAGE` to a forked CPA-Manager image tag, for example `ghcr.io/<owner>/cpa-manager:sha-<commit>`
    - `CPA_MANAGEMENT_KEY` to the plaintext Management Key used by CPA and CPA-Manager
    - `CPA_MANAGER_USAGE_QUERY_LIMIT` to the number of recent usage events CPA-Manager loads per dashboard request
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
@@ -126,6 +127,7 @@ Notes:
 - The Tailscale access path is plain HTTP on the private tailnet, not HTTPS through Cloudflare.
 - The management API still requires the configured management secret.
 - Run only one CPA-Manager Usage Service per CPA instance because it drains `/v0/management/usage-queue`.
+- `CPA_MANAGER_IMAGE` defaults to `seakee/cpa-manager:latest`. For a maintained fork, pin a fixed `sha-<commit>` or version tag in `/opt/cliproxyapi/.env`; reserve `latest` for manual testing.
 - CPA-Manager defaults to `CPA_MANAGER_USAGE_QUERY_LIMIT=100` in this compose file so the monitoring page does not block on a full SQLite history scan. Raise it in `/opt/cliproxyapi/.env` only when you explicitly need a larger historical window and the service can return it before the frontend timeout.
 
 ## GHCR Notes
