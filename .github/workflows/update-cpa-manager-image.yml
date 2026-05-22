@@ -1,0 +1,109 @@
+name: Update CPA-Manager Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/update-cpa-manager-image.yml
+  workflow_dispatch:
+    inputs:
+      image:
+        description: CPA-Manager image tag to write into /opt/cliproxyapi/.env
+        required: true
+        default: ghcr.io/dovelanlan/cpa-manager:sha-317e9498bbefa0aa12b5e96837bfd6a7cbc8e3bc
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpa-manager-image-production
+  cancel-in-progress: false
+
+env:
+  DEPLOY_HOST: 23.175.201.12
+  DEPLOY_PORT: "22"
+  DEPLOY_USER: root
+  DEPLOY_ROOT: /opt/cliproxyapi
+  DEFAULT_CPA_MANAGER_IMAGE: ghcr.io/dovelanlan/cpa-manager:sha-317e9498bbefa0aa12b5e96837bfd6a7cbc8e3bc
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Determine target image
+        id: target
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            image="${{ inputs.image }}"
+          else
+            image="${DEFAULT_CPA_MANAGER_IMAGE}"
+          fi
+          if [[ ! "$image" =~ ^ghcr\.io/dovelanlan/cpa-manager:[A-Za-z0-9._@:-]+$ ]]; then
+            echo "Unsupported CPA-Manager image: $image" >&2
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Update server env and restart CPA-Manager
+        env:
+          TARGET_IMAGE: ${{ steps.target.outputs.image }}
+        run: |
+          set -euo pipefail
+          quoted_image="$(printf '%q' "$TARGET_IMAGE")"
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "CPA_MANAGER_IMAGE_VALUE=$quoted_image DEPLOY_ROOT='$DEPLOY_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          env_file="$DEPLOY_ROOT/.env"
+          compose_file="$DEPLOY_ROOT/compose.production.yml"
+
+          test -f "$compose_file"
+          grep -q 'CPA_MANAGER_IMAGE' "$compose_file"
+
+          if [[ ! -f "$env_file" ]]; then
+            touch "$env_file"
+            chmod 600 "$env_file"
+          fi
+
+          backup_file="$env_file.bak.$(date -u +%Y%m%d%H%M%S)"
+          cp "$env_file" "$backup_file"
+
+          tmp_file="$(mktemp)"
+          awk -v image="$CPA_MANAGER_IMAGE_VALUE" '
+            BEGIN { updated = 0 }
+            /^CPA_MANAGER_IMAGE=/ {
+              print "CPA_MANAGER_IMAGE=" image
+              updated = 1
+              next
+            }
+            { print }
+            END {
+              if (updated == 0) {
+                print "CPA_MANAGER_IMAGE=" image
+              }
+            }
+          ' "$env_file" > "$tmp_file"
+          cat "$tmp_file" > "$env_file"
+          rm -f "$tmp_file"
+
+          cd "$DEPLOY_ROOT"
+          docker compose -f "$compose_file" pull cpa-manager
+          docker compose -f "$compose_file" up -d cpa-manager
+          docker inspect --format 'cpa-manager image={{.Config.Image}}' cpa-manager
+          docker compose -f "$compose_file" ps cpa-manager
+          REMOTE

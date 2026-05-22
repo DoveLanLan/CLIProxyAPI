@@ -1,0 +1,16 @@
+{
+  "name": "Update VPS CPA-Manager image",
+  "type": "ops",
+  "branch": "main",
+  "priority": "P1",
+  "description": "Use production GitHub Actions SSH secrets to set the VPS CPA_MANAGER_IMAGE and restart CPA-Manager.",
+  "depends_on": [
+    "05-22-configurable-cpa-manager-image"
+  ],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-05-22T00:00:00Z"
+}
