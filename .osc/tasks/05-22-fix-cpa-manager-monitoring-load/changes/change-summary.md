@@ -6,8 +6,8 @@
 
 ## What changed
 
-- Added `USAGE_QUERY_LIMIT: ${CPA_MANAGER_USAGE_QUERY_LIMIT:-1000}` to the production CPA-Manager service environment.
-- Documented `CPA_MANAGER_USAGE_QUERY_LIMIT` in the VPS deployment guide, including lowering it to `200` or `100` if the dashboard still times out.
+- Added `USAGE_QUERY_LIMIT: ${CPA_MANAGER_USAGE_QUERY_LIMIT:-100}` to the production CPA-Manager service environment.
+- Documented `CPA_MANAGER_USAGE_QUERY_LIMIT` in the VPS deployment guide, including raising it only when a larger historical window returns before the frontend timeout.
 - Recorded browser findings: `/status` succeeds, while `/v0/management/usage` and `/v0/management/usage/export` time out; frontend auto-refresh can keep the loading overlay active.
 
 ## Why

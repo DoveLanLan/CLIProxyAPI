@@ -30,7 +30,7 @@
 ## Acceptance Criteria (testable)
 
 1. Production compose passes an explicit `USAGE_QUERY_LIMIT` to the `cpa-manager` container. (Verify: inspect `deploy/compose.production.yml`)
-2. Operators can override the limit from `.env` without editing compose. (Verify: variable uses `${CPA_MANAGER_USAGE_QUERY_LIMIT:-...}`)
+2. Operators can override the limit from `.env` without editing compose. (Verify: variable uses `${CPA_MANAGER_USAGE_QUERY_LIMIT:-100}`)
 3. Deployment docs explain why the limit exists and how to lower it if the panel still times out. (Verify: inspect `deploy/README.md`)
 4. No `.github`, Docker build file, or `internal/translator/**` path is modified. (Verify: `git diff --name-only`)
 

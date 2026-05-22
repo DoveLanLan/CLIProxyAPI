@@ -36,7 +36,7 @@
 
 ## Actual Gate Results
 
-- PASS: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config` rendered successfully and included `USAGE_QUERY_LIMIT: "1000"`.
+- PASS: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config` rendered successfully and included `USAGE_QUERY_LIMIT: "100"`.
 - PASS: `git diff --name-only` showed only `.osc/quality-gate.md`, `deploy/README.md`, and `deploy/compose.production.yml` among tracked changes.
 - PASS: `git diff --check`.
 - PASS: `go build -o test-output ./cmd/server && rm test-output`.
@@ -49,7 +49,7 @@
 - API/contract compatibility: no CLIProxyAPI public API or SDK contract changed.
 - Observability: no logging changes.
 - Config/env changes: new `CPA_MANAGER_USAGE_QUERY_LIMIT` deployment variable is documented.
-- Performance risk: default query window is reduced to improve page-load latency at the cost of exhaustive historical display.
+- Performance risk: default query window is reduced aggressively to improve page-load latency at the cost of exhaustive historical display.
 - Rollback plan: remove `USAGE_QUERY_LIMIT` from compose or set `CPA_MANAGER_USAGE_QUERY_LIMIT=50000`, then restart `cpa-manager`.
 
 ## PR-ready checklist

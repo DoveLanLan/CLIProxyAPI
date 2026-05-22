@@ -30,7 +30,7 @@ The CPA-Manager monitoring page on the VPS stays behind a loading overlay even t
 
 ## Proposed Approach (high-level)
 
-Set an explicit CPA-Manager Usage Service query limit in the production compose environment so `/v0/management/usage` reads a bounded recent window instead of the default 50,000 events. This is a deployment-side mitigation for the currently deployed external service. The deeper upstream fixes remain in CPA-Manager: make usage requests cancel/settle cleanly under auto-refresh and avoid reading large raw event payloads for the dashboard response.
+Set an explicit CPA-Manager Usage Service query limit in the production compose environment so `/v0/management/usage` reads a small bounded recent window instead of the default 50,000 events. This is a deployment-side mitigation for the currently deployed external service. The deeper upstream fixes remain in CPA-Manager: make usage requests cancel/settle cleanly under auto-refresh and avoid reading large raw event payloads for the dashboard response.
 
 ## Risks & Mitigations
 

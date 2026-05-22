@@ -14,7 +14,7 @@
 
 - [x] 1) Bound CPA-Manager usage queries
   - Target: `deploy/compose.production.yml`
-  - Change: Add `USAGE_QUERY_LIMIT: ${CPA_MANAGER_USAGE_QUERY_LIMIT:-1000}` to the `cpa-manager` service environment.
+  - Change: Add `USAGE_QUERY_LIMIT: ${CPA_MANAGER_USAGE_QUERY_LIMIT:-100}` to the `cpa-manager` service environment.
   - Verify: File review and `git diff --name-only`.
 
 - [x] 2) Document VPS remediation

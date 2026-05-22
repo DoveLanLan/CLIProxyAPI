@@ -15,7 +15,7 @@
 - Open `http://100.67.99.9:18318/management.html#/monitoring`.
 - Confirm `/status` returns quickly and reports the collector as running.
 - Confirm `/v0/management/usage` returns before the frontend timeout and the loading overlay disappears.
-- If it still times out, set `CPA_MANAGER_USAGE_QUERY_LIMIT=200` or `100` in `/opt/cliproxyapi/.env` and restart only `cpa-manager`.
+- If a larger history window is needed, raise `CPA_MANAGER_USAGE_QUERY_LIMIT` gradually in `/opt/cliproxyapi/.env` and restart only `cpa-manager`.
 
 ## Security Checks
 

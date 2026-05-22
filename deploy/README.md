@@ -126,7 +126,7 @@ Notes:
 - The Tailscale access path is plain HTTP on the private tailnet, not HTTPS through Cloudflare.
 - The management API still requires the configured management secret.
 - Run only one CPA-Manager Usage Service per CPA instance because it drains `/v0/management/usage-queue`.
-- CPA-Manager defaults to `CPA_MANAGER_USAGE_QUERY_LIMIT=1000` in this compose file so the monitoring page does not block on a full SQLite history scan. If `/v0/management/usage` still times out or the page remains on `Loading`, lower it to `200` or `100` in `/opt/cliproxyapi/.env` and restart only the `cpa-manager` service. Set it back to `50000` only when you explicitly need a larger historical window and the service can return it quickly.
+- CPA-Manager defaults to `CPA_MANAGER_USAGE_QUERY_LIMIT=100` in this compose file so the monitoring page does not block on a full SQLite history scan. Raise it in `/opt/cliproxyapi/.env` only when you explicitly need a larger historical window and the service can return it before the frontend timeout.
 
 ## GHCR Notes
 

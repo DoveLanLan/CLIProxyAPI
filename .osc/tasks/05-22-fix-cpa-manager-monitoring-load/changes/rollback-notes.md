@@ -15,5 +15,5 @@
 
 ## Follow-up Remediation
 
-- If bounded queries still hang, inspect the CPA-Manager SQLite database for unusually large `raw_json` rows or rotate/prune the CPA-Manager data volume manually after backing it up.
+- If bounded queries still hang even at `100`, inspect the CPA-Manager SQLite database for unusually large `raw_json` rows or rotate/prune the CPA-Manager data volume manually after backing it up.
 - Upstream CPA-Manager should fix the dashboard endpoint to avoid selecting raw event payloads when building normal monitoring summaries.
