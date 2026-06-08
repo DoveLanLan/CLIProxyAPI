@@ -14,3 +14,4 @@
 - journal-10.md — Fix CPA-Manager monitoring load
 - journal-11.md — Configure CPA-Manager fork image override
 - journal-12.md — CPA-Manager fork panel release handoff
+- journal-13.md — Docker Compose rebuild fix

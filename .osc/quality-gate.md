@@ -1,59 +1,61 @@
-# Quality Gate
+# Quality Gate: Docker Compose Rebuild Fix
 
-- Date: 2026-05-22
-- Scope: Make CPA-Manager image configurable for production deployment.
+- Date: 2026-06-08
+- Scope: Dockerfile changes for Docker Compose image rebuild reliability.
 
-## Assumptions:
+## Assumptions
+- This task only changed Docker build behavior and persisted change documentation.
+- No Go source files were changed, so full Go unit testing is recommended but not required to validate the Docker rebuild request.
 
-- This change is deployment-only and does not alter Go runtime behavior.
-- The VPS production stack uses `deploy/compose.production.yml`.
+## Suspected Change Scope
+- `Dockerfile`: builder dependencies, BuildKit cache mounts, module download retry, Go build flags.
+- `docker-compose.yml`: used as the local build/runtime entrypoint; not changed.
+- Docker service `cli-proxy-api`: rebuilt and force-recreated.
 
-## Suspected Change Scope:
-
-- `deploy/compose.production.yml`
-- `deploy/README.md`
-- `.osc/tasks/05-22-configurable-cpa-manager-image/**`
-
-## Detected Gates:
-
-- Gate Name: PR Go build
+## Detected Gates
+- Gate Name: Docker image build
   - Confidence: High
-  - Evidence: `.github/workflows/pr-test-build.yml` job `build`, step `Build`, runs `go build -o test-output ./cmd/server`.
-- Gate Name: Docker image build/publish
+  - Evidence: `Dockerfile`, `docker-compose.yml`, `.github/workflows/docker-image.yml`
+- Gate Name: Go compile
+  - Confidence: High
+  - Evidence: `go.mod`, `Dockerfile` build command, `AGENTS.md` command `go build -o cli-proxy-api ./cmd/server`
+- Gate Name: Go tests
   - Confidence: Medium
-  - Evidence: `.github/workflows/docker-image.yml` job `build-and-push` builds CLIProxyAPI image on pushes to `main` and tags.
-- Gate Name: Compose render validation
-  - Confidence: Medium
-  - Evidence: deployment change is in `deploy/compose.production.yml`; previous CPA-Manager deployment task used Docker Compose config rendering as the local validation gate.
-- Gate Name: Diff whitespace check
-  - Confidence: Medium
-  - Evidence: repository convention from prior `.osc` regression checklists and safe text/YAML hygiene.
+  - Evidence: `go.mod`, `AGENTS.md` command `go test ./...`, `.github/workflows/pr-test-build.yml`
+- Gate Name: Runtime container startup
+  - Confidence: High
+  - Evidence: `docker-compose.yml` service `cli-proxy-api` and published port `8317`
 
-## Suggested Gate Run (Local):
+## Suggested Gate Run (Local)
+1. Build Docker image:
+   - Command: `GOPROXY='https://proxy.golang.org,https://goproxy.cn,https://goproxy.io,direct' GOSUMDB='sum.golang.org' docker compose build cli-proxy-api`
+   - Result: Passed; image `sha256:48f93f77e84a280f908c1aeed58d214057ffccf8fc29b618cef2eb94d8f3be81`.
+2. Recreate runtime container:
+   - Command: `docker compose up -d --force-recreate cli-proxy-api`
+   - Result: Passed; container `cli-proxy-api` started.
+3. Verify runtime status:
+   - Command: `docker ps --filter name=cli-proxy-api`
+   - Result: Passed; port `8317` is mapped.
+4. Inspect startup logs:
+   - Command: `docker logs --tail 100 cli-proxy-api`
+   - Result: Startup passed; management routes responded with HTTP 200. Unrelated auth refresh warnings and upstream/API 502 entries remain.
+5. Optional broader Go verification:
+   - Command: `go test ./...`
+   - Result: Not run for this Docker-only rebuild task.
 
-1. `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config`
-   - Rationale: verifies the default CPA-Manager image still renders.
-2. `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test CPA_MANAGER_IMAGE=ghcr.io/example/cpa-manager:sha-test docker compose -f deploy/compose.production.yml config`
-   - Rationale: verifies the fork image override renders.
-3. `git diff --check`
-   - Rationale: catches whitespace and patch hygiene issues.
-4. `go build -o test-output ./cmd/server && rm test-output`
-   - Rationale: mirrors the PR build gate from `.github/workflows/pr-test-build.yml`.
+## Final Self-Review
+- Security & secrets: No secrets added; Dockerfile changes do not log tokens.
+- Edge cases & error handling: Transient module download EOFs are retried; BuildKit cache preserves completed module downloads.
+- Backward compatibility / migrations: No data, schema, or config migrations.
+- API/contract compatibility: No API changes.
+- Observability: No runtime logging behavior changed.
+- Config/env changes: Existing compose build args remain compatible; runtime bind mounts unchanged.
+- Performance risk: Build cache can consume Docker builder cache space, but reduces repeated network downloads and build time.
+- Rollback plan: Revert Dockerfile changes and rebuild/recreate, or redeploy a previously known-good image.
 
-## Final Self-Review:
-
-- Security & secrets: no secrets or credentials added; image override is non-secret configuration.
-- Edge cases & error handling: invalid image values fail during Docker pull/start, with rollback by unsetting the env var.
-- Backward compatibility / migrations: default image, ports, volumes, and data paths remain unchanged; no migration.
-- API/contract compatibility: no API or CLI contracts changed.
-- Observability: not applicable for deployment image parameterization.
-- Config/env changes: added optional `CPA_MANAGER_IMAGE`; docs updated.
-- Performance risk: no runtime performance change.
-- Rollback plan: unset `CPA_MANAGER_IMAGE` or set it to `seakee/cpa-manager:latest`, then restart CPA-Manager.
-
-## PR-ready checklist:
-
-- [x] Default compose render: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test docker compose -f deploy/compose.production.yml config`
-- [x] Override compose render: `TAILSCALE_BIND_IP=127.0.0.1 CLI_PROXY_IMAGE=test CPA_MANAGER_IMAGE=ghcr.io/example/cpa-manager:sha-test docker compose -f deploy/compose.production.yml config`
-- [x] Diff hygiene: `git diff --check`
-- [x] Build: `go build -o test-output ./cmd/server && rm test-output`
+## PR-ready checklist
+- [x] `GOPROXY='https://proxy.golang.org,https://goproxy.cn,https://goproxy.io,direct' GOSUMDB='sum.golang.org' docker compose build cli-proxy-api`
+- [x] `docker compose up -d --force-recreate cli-proxy-api`
+- [x] `docker ps --filter name=cli-proxy-api`
+- [x] `docker logs --tail 100 cli-proxy-api`
+- [ ] `go test ./...` (optional broader regression check; not run because no Go source changed)
