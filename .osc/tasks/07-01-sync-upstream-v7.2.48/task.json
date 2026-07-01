@@ -1,0 +1,15 @@
+{
+  "name": "Sync upstream v7.2.48 preserving deploy and cpa-manager",
+  "type": "refactor",
+  "branch": "main",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [
+    "05-22-merge-upstream-non-docker-changes"
+  ],
+  "status": "planned",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "ready"
+}
