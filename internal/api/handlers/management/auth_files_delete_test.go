@@ -1,7 +1,6 @@
 package management
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -18,7 +17,6 @@ import (
 
 func TestDeleteAuthFile_UsesAuthPathFromManager(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
-	gin.SetMode(gin.TestMode)
 
 	tempDir := t.TempDir()
 	authDir := filepath.Join(tempDir, "auth")
@@ -102,7 +100,6 @@ func TestDeleteAuthFile_UsesAuthPathFromManager(t *testing.T) {
 
 func TestDeleteAuthFile_FallbackToAuthDirPath(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
-	gin.SetMode(gin.TestMode)
 
 	authDir := t.TempDir()
 	fileName := "fallback-user.json"
@@ -129,52 +126,47 @@ func TestDeleteAuthFile_FallbackToAuthDirPath(t *testing.T) {
 	}
 }
 
-func TestDeleteAuthFile_JSONBodyNames(t *testing.T) {
+func TestDeleteAuthFile_RemovesRuntimeAuth(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
-	gin.SetMode(gin.TestMode)
 
 	authDir := t.TempDir()
-	fileNames := []string{
-		"codex-heweitest260407@outlook.com-free.json",
-		"codex-user@example.com-plus.json",
-	}
-	for _, fileName := range fileNames {
-		filePath := filepath.Join(authDir, fileName)
-		if errWrite := os.WriteFile(filePath, []byte(`{"type":"codex"}`), 0o600); errWrite != nil {
-			t.Fatalf("failed to write auth file %s: %v", fileName, errWrite)
-		}
+	fileName := "runtime-remove-user.json"
+	filePath := filepath.Join(authDir, fileName)
+	if errWrite := os.WriteFile(filePath, []byte(`{"type":"codex","email":"runtime@example.com"}`), 0o600); errWrite != nil {
+		t.Fatalf("failed to write auth file: %v", errWrite)
 	}
 
 	manager := coreauth.NewManager(nil, nil, nil)
+	record := &coreauth.Auth{
+		ID:       "runtime-remove-auth",
+		FileName: fileName,
+		Provider: "codex",
+		Status:   coreauth.StatusActive,
+		Attributes: map[string]string{
+			"path": filePath,
+		},
+		Metadata: map[string]any{
+			"type":  "codex",
+			"email": "runtime@example.com",
+		},
+	}
+	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
+		t.Fatalf("failed to register auth record: %v", errRegister)
+	}
+
 	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, manager)
 	h.tokenStore = &memoryAuthStore{}
 
-	body, errMarshal := json.Marshal(map[string][]string{"names": fileNames})
-	if errMarshal != nil {
-		t.Fatalf("failed to marshal request body: %v", errMarshal)
-	}
-
 	deleteRec := httptest.NewRecorder()
 	deleteCtx, _ := gin.CreateTestContext(deleteRec)
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v0/management/auth-files", bytes.NewReader(body))
-	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v0/management/auth-files?name="+url.QueryEscape(fileName), nil)
 	deleteCtx.Request = deleteReq
 	h.DeleteAuthFile(deleteCtx)
 
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("expected delete status %d, got %d with body %s", http.StatusOK, deleteRec.Code, deleteRec.Body.String())
 	}
-	var payload map[string]any
-	if errUnmarshal := json.Unmarshal(deleteRec.Body.Bytes(), &payload); errUnmarshal != nil {
-		t.Fatalf("failed to decode delete payload: %v", errUnmarshal)
-	}
-	if deleted, _ := payload["deleted"].(float64); deleted != float64(len(fileNames)) {
-		t.Fatalf("expected deleted count %d, got payload %#v", len(fileNames), payload)
-	}
-	for _, fileName := range fileNames {
-		filePath := filepath.Join(authDir, fileName)
-		if _, errStat := os.Stat(filePath); !os.IsNotExist(errStat) {
-			t.Fatalf("expected auth file %s to be removed, stat err: %v", fileName, errStat)
-		}
+	if _, ok := manager.GetByID(record.ID); ok {
+		t.Fatalf("expected runtime auth %q to be removed", record.ID)
 	}
 }

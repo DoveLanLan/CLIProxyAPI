@@ -1,6 +1,7 @@
 package cliproxy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
@@ -116,7 +117,7 @@ func TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh(t *test
 		Prefix:   prefix,
 	}
 
-	service.registerModelsForAuth(auth)
+	service.registerModelsForAuth(context.Background(), auth)
 	t.Cleanup(func() {
 		registry.GetGlobalRegistry().UnregisterClient(clientID)
 	})

@@ -105,7 +105,7 @@ remote-management:
   allow-remote: true
   secret-key: "set-a-strong-management-secret"
   disable-control-panel: false
-  panel-github-repository: "https://github.com/seakee/CPA-Manager"
+  panel-github-repository: "https://github.com/seakee/CPA-Manager-Plus"
 
 usage-statistics-enabled: true
 redis-usage-queue-retention-seconds: 60

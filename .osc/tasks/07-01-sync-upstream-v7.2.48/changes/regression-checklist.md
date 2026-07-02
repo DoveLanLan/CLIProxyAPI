@@ -7,42 +7,45 @@
 
 - Build: `go build -o test-output ./cmd/server && rm test-output`
 - Tests: `go test ./...`
-- Format: `gofmt -l` clean on changed Go files
-- Whitespace/conflict: `git diff --check`; `git diff --name-only --diff-filter=U` empty; no conflict markers
-- Protected paths: `git status --short -- .github Dockerfile .dockerignore docker-build.sh docker-build.ps1 'docker-compose*.yml' .env.cluster.example deploy .goreleaser.yml` empty
-- CPA-Manager defaults: `internal/config/config.go` + `internal/managementasset/updater.go` still point at `seakee/CPA-Manager`
+- Format: `gofmt` on changed Go files
+- Whitespace/conflict: `git diff --cached --check`; `git diff --name-only --diff-filter=U` empty; no conflict markers
+- Protected paths: `git status --short -- .github Dockerfile .dockerignore docker-build.sh docker-build.ps1 'docker-compose*.yml' .env.cluster.example deploy .goreleaser.yml` only shows intentional `deploy/README.md` Plus documentation update
+- CPA-Manager defaults: `internal/config/config.go` + `internal/managementasset/updater.go` point at `seakee/CPA-Manager-Plus`
 
-## To Execute
+## Executed
 
 ### Automated Checks
 
-- [ ] No unresolved merge files: `git diff --name-only --diff-filter=U`
-- [ ] No conflict markers: `rg -n '^(<<<<<<<|=======|>>>>>>>)' -S . --glob '!logs/**' --glob '!auths/**' --glob '!tmp/**'`
-- [ ] Excluded files unchanged: `git status --short -- .github Dockerfile .dockerignore docker-build.sh docker-build.ps1 'docker-compose*.yml' .env.cluster.example deploy .goreleaser.yml`
-- [ ] Formatting: `gofmt -l` on changed Go files
-- [ ] Whitespace check: `git diff --check`
-- [ ] New upstream subsystems present: `git ls-tree -d --name-only upstream/main` parity for `internal/{pluginhost,pluginstore,signature,safemode,homeplugins,htmlsanitize,httpfetch}` and `sdk/{pluginabi,pluginapi,pluginhost,pluginstore}`
-- [ ] CPA-Manager defaults: `git grep -n 'seakee/CPA-Manager' -- internal/config/config.go internal/managementasset/updater.go`
-- [ ] Focused Codex invalidated-token fallback: `go test ./sdk/cliproxy/auth -run TestManager_CodexInvalidatedOAuthTokenDisablesAndFallsBackWithMaxRetryOne -v`
-- [ ] Focused auth package: `go test ./sdk/cliproxy/auth`
-- [ ] Focused OpenAI compat xhigh thinking: `go test ./sdk/cliproxy -run TestServiceOpenAICompatThinking` (and related)
-- [ ] Focused OpenAI stream null usage: `go test ./sdk/api/handlers/openai` (null usage chunk test)
-- [ ] Focused DeepSeek reasoning echo: `go test ./internal/runtime/executor` / `internal/translator` DeepSeek tests
-- [ ] Focused GPT-5.5 Codex free-tier filter: `go test ./internal/registry ./sdk/api/handlers/openai` (codex client models test)
-- [ ] Focused string system prompt: `go test ./internal/runtime/executor -run TestCheckSystemInstructionsWithMode` (string system prompt test)
-- [ ] New upstream plugin suite: `go test ./internal/pluginhost ./internal/pluginstore ./sdk/pluginhost ./sdk/pluginstore ./internal/signature ./internal/safemode`
-- [ ] Full test suite: `go test ./...`
-- [ ] Server compile gate: `go build -o test-output ./cmd/server && rm test-output`
+- [x] No unresolved merge files: `git diff --name-only --diff-filter=U` returned `0`.
+- [x] No conflict markers: grep check over Go/YAML/Markdown returned no markers outside ignored artifacts.
+- [x] Excluded files unchanged: protected-path check showed only intentional `deploy/README.md` doc update.
+- [x] Formatting: `gofmt` on changed Go files.
+- [x] Whitespace check: `git diff --cached --check` passed.
+- [x] New upstream subsystems present: pluginhost/pluginstore/signature/safemode/homeplugins/htmlsanitize/httpfetch and sdk plugin packages are present.
+- [x] CPA-Manager-Plus defaults: `git grep -n 'seakee/CPA-Manager-Plus' -- internal/config/config.go internal/managementasset/updater.go config.example.yaml README.md README_CN.md README_JA.md deploy/README.md`.
+- [x] Focused Codex invalidated-token fallback: `go test ./sdk/cliproxy/auth -run 'TestManager_CodexInvalidatedOAuthTokenDisablesAndFallsBackWithMaxRetryOne|TestManager_CodexGeneric401UsesTemporaryCooldownAndMaxRetryLimit' -v`.
+- [x] Focused auth package: `go test ./sdk/cliproxy/auth -run 'TestManager_Codex|TestManagerOverrides|TestFile|TestSelector' -v`.
+- [x] Focused OpenAI compat xhigh thinking: `go test ./sdk/cliproxy -run TestOpenAICompat -v`.
+- [x] Focused OpenAI stream null usage: `go test ./internal/runtime/executor/helps -run 'TestParseOpenAIStreamUsage' -v`.
+- [x] Focused GPT-5.5 Codex free-tier filter and registry: `go test ./internal/registry -run 'TestCodex|TestValidate|TestStatic|TestGet|TestAntigravity|TestWithXAI' -v`.
+- [x] Focused string system prompt: `go test ./internal/runtime/executor -run 'Test.*System.*String|TestCheckSystemInstructionsWithMode' -v`.
+- [x] Focused websocket log cap: `go test ./sdk/api/handlers/openai -run 'TestAppendWebsocketEvent' -v`.
+- [x] Focused management/CPA usage: `go test ./internal/api/handlers/management -run 'Test.*Usage|Test.*AuthFiles|Test.*Config|Test.*Handler' -v`.
+- [x] Focused redisqueue: `go test ./internal/redisqueue -v`.
+- [x] Focused OpenAI image/video/websocket handlers: `go test ./sdk/api/handlers/openai -run 'Test.*Usage|Test.*Codex|TestAppendWebsocketEvent|Test.*Images|Test.*Videos' -v`.
+- [x] Full test suite: `go test ./...` passed.
+- [x] Server compile gate: `go build -o test-output ./cmd/server && rm test-output` passed.
 
 ### Manual Checks
 
-- [ ] Confirmed `.github` and Docker/deploy-related upstream changes were excluded.
-- [ ] Confirmed translator changes are part of the broader upstream sync, not a translator-only task.
-- [ ] Confirmed CPA-Manager default repository remains `seakee/CPA-Manager`.
-- [ ] Confirmed local OpenAI-compatible `xhigh` thinking defaults and tests remain present after sync.
-- [ ] Confirmed local Codex invalidated OAuth token fallback still passes with `max-retry-credentials: 1`.
-- [ ] Confirmed DeepSeek model registry helpers and GPT-5.5 free-tier filtering remain.
-- [ ] Spot-checked `config.example.yaml` for upstream-added fields (plugin, safemode, `disable-cooling`, `rebuild_mid_system_message`, `max` reasoning) without losing local CPA-Manager/deploy sections.
+- [x] Confirmed `.github` and Docker/deploy-related upstream changes were excluded except the intentional `deploy/README.md` Plus doc update.
+- [x] Confirmed translator changes are part of the broader upstream sync, not a translator-only task.
+- [x] Confirmed CPA-Manager default repository remains `seakee/CPA-Manager-Plus`.
+- [x] Confirmed local OpenAI-compatible `xhigh` thinking defaults and tests remain present after sync.
+- [x] Confirmed local Codex invalidated OAuth token fallback still passes with `max-retry-credentials: 1`.
+- [x] Confirmed DeepSeek model registry helpers and GPT-5.5 free-tier filtering remain.
+- [x] Confirmed upstream-deleted Amp and Gemini CLI paths are removed.
+- [x] Spot-checked `config.example.yaml` for upstream-added fields (plugin, safemode, `disable-cooling`, image/video, cooldown) without losing CPA-Manager-Plus defaults.
 
 ## Follow-up Regression Areas (pre-deployment)
 
@@ -53,4 +56,4 @@
 
 ## Residual Risk
 
-- Large upstream sync touching runtime routing, translators, SDK handlers, registry data, and management APIs. Automated tests and build pass is required, but production config should still be reviewed before rollout because upstream introduced new config fields, provider behavior, and the plugin subsystem.
+- Large upstream sync touching runtime routing, translators, SDK handlers, registry data, and management APIs. Automated tests and build pass, but production config should still be reviewed before rollout because upstream introduced new config fields, provider behavior, and the plugin subsystem.

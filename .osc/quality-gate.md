@@ -1,61 +1,80 @@
-# Quality Gate: Docker Compose Rebuild Fix
+# Quality Gate: Sync Upstream v7.2.48 Preserving Deploy and CPA-Manager
 
-- Date: 2026-06-08
-- Scope: Dockerfile changes for Docker Compose image rebuild reliability.
+- Date: 2026-07-02
+- Scope: Upstream `router-for-me/CLIProxyAPI` sync to `v7.2.48` (`956ce7cf`) while preserving local deploy/ops and CPA-Manager-Plus defaults.
 
 ## Assumptions
-- This task only changed Docker build behavior and persisted change documentation.
-- No Go source files were changed, so full Go unit testing is recommended but not required to validate the Docker rebuild request.
 
-## Suspected Change Scope
-- `Dockerfile`: builder dependencies, BuildKit cache mounts, module download retry, Go build flags.
-- `docker-compose.yml`: used as the local build/runtime entrypoint; not changed.
-- Docker service `cli-proxy-api`: rebuilt and force-recreated.
+- The sync stays local on `task/sync-upstream-v7.2.48`; push and production deployment are separate.
+- Protected deployment paths are preserved except intentional `deploy/README.md` panel-source documentation update.
+- Upstream removal of Amp and Gemini CLI code paths is accepted.
 
 ## Detected Gates
-- Gate Name: Docker image build
-  - Confidence: High
-  - Evidence: `Dockerfile`, `docker-compose.yml`, `.github/workflows/docker-image.yml`
-- Gate Name: Go compile
-  - Confidence: High
-  - Evidence: `go.mod`, `Dockerfile` build command, `AGENTS.md` command `go build -o cli-proxy-api ./cmd/server`
-- Gate Name: Go tests
-  - Confidence: Medium
-  - Evidence: `go.mod`, `AGENTS.md` command `go test ./...`, `.github/workflows/pr-test-build.yml`
-- Gate Name: Runtime container startup
-  - Confidence: High
-  - Evidence: `docker-compose.yml` service `cli-proxy-api` and published port `8317`
 
-## Suggested Gate Run (Local)
-1. Build Docker image:
-   - Command: `GOPROXY='https://proxy.golang.org,https://goproxy.cn,https://goproxy.io,direct' GOSUMDB='sum.golang.org' docker compose build cli-proxy-api`
-   - Result: Passed; image `sha256:48f93f77e84a280f908c1aeed58d214057ffccf8fc29b618cef2eb94d8f3be81`.
-2. Recreate runtime container:
-   - Command: `docker compose up -d --force-recreate cli-proxy-api`
-   - Result: Passed; container `cli-proxy-api` started.
-3. Verify runtime status:
-   - Command: `docker ps --filter name=cli-proxy-api`
-   - Result: Passed; port `8317` is mapped.
-4. Inspect startup logs:
-   - Command: `docker logs --tail 100 cli-proxy-api`
-   - Result: Startup passed; management routes responded with HTTP 200. Unrelated auth refresh warnings and upstream/API 502 entries remain.
-5. Optional broader Go verification:
+- Gate Name: Server compile
+  - Confidence: High
+  - Evidence: `AGENTS.md`, PR build convention
+- Gate Name: Full Go tests
+  - Confidence: High
+  - Evidence: `AGENTS.md`, broad protocol/runtime/auth/management changes
+- Gate Name: Conflict/format check
+  - Confidence: High
+  - Evidence: large merge with prior conflicts
+- Gate Name: Local behavior regression checks
+  - Confidence: High
+  - Evidence: fork-specific patches re-ported during sync
+
+## Executed Gates
+
+1. Conflict check
+   - Command: `git diff --name-only --diff-filter=U`
+   - Result: Passed; `0` unresolved files.
+2. Conflict marker scan
+   - Command: grep scan over Go/YAML/Markdown files for `<<<<<<<`, `=======`, `>>>>>>>`
+   - Result: Passed; no markers found outside ignored artifacts.
+3. Formatting
+   - Command: `gofmt` on changed Go files
+   - Result: Passed.
+4. Whitespace check
+   - Command: `git diff --cached --check`
+   - Result: Passed.
+5. Server build
+   - Command: `go build -o test-output ./cmd/server && rm test-output`
+   - Result: Passed.
+6. Full tests
    - Command: `go test ./...`
-   - Result: Not run for this Docker-only rebuild task.
+   - Result: Passed.
+7. Focused local behavior checks
+   - Commands included:
+     - `go test ./sdk/cliproxy/auth -run 'TestManager_CodexInvalidatedOAuthTokenDisablesAndFallsBackWithMaxRetryOne|TestManager_CodexGeneric401UsesTemporaryCooldownAndMaxRetryLimit' -v`
+     - `go test ./sdk/cliproxy -run TestOpenAICompat -v`
+     - `go test ./internal/runtime/executor/helps -run 'TestParseOpenAIStreamUsage' -v`
+     - `go test ./internal/runtime/executor -run 'Test.*System.*String|TestCheckSystemInstructionsWithMode' -v`
+     - `go test ./sdk/api/handlers/openai -run 'TestAppendWebsocketEvent' -v`
+     - `go test ./internal/registry -run 'TestCodex|TestValidate|TestStatic|TestGet|TestAntigravity|TestWithXAI' -v`
+     - `go test ./internal/api/handlers/management -run 'Test.*Usage|Test.*AuthFiles|Test.*Config|Test.*Handler' -v`
+     - `go test ./internal/redisqueue -v`
+   - Result: Passed.
+8. CPA-Manager-Plus default check
+   - Command: `git grep -n 'seakee/CPA-Manager-Plus' -- internal/config/config.go internal/managementasset/updater.go config.example.yaml README.md README_CN.md README_JA.md deploy/README.md`
+   - Result: Passed.
 
 ## Final Self-Review
-- Security & secrets: No secrets added; Dockerfile changes do not log tokens.
-- Edge cases & error handling: Transient module download EOFs are retried; BuildKit cache preserves completed module downloads.
-- Backward compatibility / migrations: No data, schema, or config migrations.
-- API/contract compatibility: No API changes.
-- Observability: No runtime logging behavior changed.
-- Config/env changes: Existing compose build args remain compatible; runtime bind mounts unchanged.
-- Performance risk: Build cache can consume Docker builder cache space, but reduces repeated network downloads and build time.
-- Rollback plan: Revert Dockerfile changes and rebuild/recreate, or redeploy a previously known-good image.
+
+- Security & secrets: No secrets added; `config.yaml` remains ignored; management panel source points to public `seakee/CPA-Manager-Plus` release assets.
+- Edge cases & error handling: Codex invalidated OAuth token handling disables bad auth and persists disabled reason; generic 401 remains cooldown-limited.
+- Backward compatibility / migrations: No database/storage migration introduced; upstream config additions should keep old configs valid.
+- API/contract compatibility: Upstream API additions accepted; local protected deployment paths preserved.
+- Observability: WebSocket body log growth remains capped; upstream logging/timeline changes retained.
+- Config/env changes: `config.example.yaml` now documents upstream plugin/safemode/image/video/cooldown fields and local CPA-Manager-Plus panel source.
+- Rollback plan: revert sync commit/series or reset to `307f5ff8` if not pushed; see rollback notes.
 
 ## PR-ready checklist
-- [x] `GOPROXY='https://proxy.golang.org,https://goproxy.cn,https://goproxy.io,direct' GOSUMDB='sum.golang.org' docker compose build cli-proxy-api`
-- [x] `docker compose up -d --force-recreate cli-proxy-api`
-- [x] `docker ps --filter name=cli-proxy-api`
-- [x] `docker logs --tail 100 cli-proxy-api`
-- [ ] `go test ./...` (optional broader regression check; not run because no Go source changed)
+
+- [x] Change-workflow artifacts updated
+- [x] No unresolved conflicts
+- [x] `git diff --cached --check`
+- [x] `go build -o test-output ./cmd/server && rm test-output`
+- [x] `go test ./...`
+- [x] Focused local behavior tests
+- [x] CPA-Manager-Plus defaults verified

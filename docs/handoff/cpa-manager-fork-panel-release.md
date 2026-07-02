@@ -1,4 +1,4 @@
-# Handoff: CPA-Manager Fork Panel Release
+# Handoff: CPA-Manager-Plus Panel Release
 
 - Date: 2026-05-22
 - Owner: hewei
@@ -13,16 +13,16 @@
 - CLIProxyAPI has a workflow that updates the VPS `.env` key `CPA_MANAGER_IMAGE` and restarts only the `cpa-manager` service:
   - `.github/workflows/update-cpa-manager-image.yml`
 - The monitoring page at `http://100.67.99.9:18318/management.html#/monitoring` rendered data after the deploy.
-- CLIProxyAPI `config.yaml` still points the built-in panel updater at upstream:
-  - `remote-management.panel-github-repository: "https://github.com/seakee/CPA-Manager"`
+- CLIProxyAPI `config.yaml` should point the built-in panel updater at CPA-Manager-Plus:
+  - `remote-management.panel-github-repository: "https://github.com/seakee/CPA-Manager-Plus"`
 
 ## Why This Still Needs Work
 
 `panel-github-repository` is not the Docker image source. It controls where CLIProxyAPI downloads the built-in `/management.html` panel asset from GitHub Releases.
 
-The upstream repository currently has a latest release with `management.html`:
+The Plus repository currently has a latest release with `management.html`:
 
-- `seakee/CPA-Manager` latest release: `v1.3.3`
+- `seakee/CPA-Manager-Plus` latest release: `v1.10.1` (verified 2026-07-02)
 - Asset includes: `management.html`
 
 The fork does not currently have a latest release, so changing CLIProxyAPI to:
@@ -185,7 +185,7 @@ Set CLIProxyAPI back to upstream panel releases:
 
 ```yaml
 remote-management:
-  panel-github-repository: "https://github.com/seakee/CPA-Manager"
+  panel-github-repository: "https://github.com/seakee/CPA-Manager-Plus"
 ```
 
 Then restart/redeploy CLIProxyAPI and refresh the local panel asset.

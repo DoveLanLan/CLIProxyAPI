@@ -14,7 +14,7 @@ The fork's `main` has not synced with `router-for-me/CLIProxyAPI` since `21fad9d
 
 The fork also carries local-only deployment/ops and CPA-Manager customizations that must not be clobbered:
 - Deployment/ops: `.github/workflows/**`, `Dockerfile`, `.dockerignore`, `docker-build.*`, `docker-compose*.yml`, `deploy/**`, `.goreleaser.yml`.
-- CPA-Manager: `internal/config/config.go` (`DefaultPanelGitHubRepository = "https://github.com/seakee/CPA-Manager"`), `internal/managementasset/updater.go` (default release/fallback URLs), `config.example.yaml`, `deploy/compose.production.yml`, `.github/workflows/update-cpa-manager-image.yml`.
+- CPA-Manager: `internal/config/config.go` (`DefaultPanelGitHubRepository = "https://github.com/seakee/CPA-Manager-Plus"`), `internal/managementasset/updater.go` (default release/fallback URLs), `config.example.yaml`, `deploy/compose.production.yml`, `.github/workflows/update-cpa-manager-image.yml`.
 - Local protocol/runtime patches: Codex OAuth invalidated-token failover, OpenAI compat `xhigh` thinking defaults, OpenAI stream null-usage chunk handling, DeepSeek models + reasoning echo normalization, GPT-5.5 Codex support with free-tier filtering, `host.docker.internal` gateway mapping, websocket body-log growth cap, string-form system prompt preservation.
 
 Upstream and fork both touch overlapping files (`config.example.yaml`, `Dockerfile`, `docker-compose.yml`, `README*`, `cmd/server/main.go`, `internal/managementasset/updater.go`, `go.mod/go.sum`, management handlers, runtime executors, translators), so conflicts are expected.
@@ -29,7 +29,7 @@ Upstream and fork both touch overlapping files (`config.example.yaml`, `Dockerfi
 ## Constraints
 
 - Protected paths (never take upstream): `.github/**`, `Dockerfile`, `.dockerignore`, `docker-build.sh`, `docker-build.ps1`, `docker-compose*.yml`, `.env.cluster.example`, `deploy/**`, `.goreleaser.yml`.
-- CPA-Manager defaults in `internal/config/config.go` and `internal/managementasset/updater.go` must stay local (`seakee/CPA-Manager`).
+- CPA-Manager defaults in `internal/config/config.go` and `internal/managementasset/updater.go` must stay local (`seakee/CPA-Manager-Plus`).
 - Do not use a plain `git merge upstream/main` — upstream lacks local `.osc` state and would delete local workflow/task files; the prior syncs used patch-apply with three-way fallback, and this task continues that approach.
 - `internal/translator/**` is protected by CI for ordinary PRs, but is in scope here because the upstream sync spans broader protocol/runtime changes (same precedent as `05-22-merge-upstream-non-docker-changes`).
 - No secrets or environment-specific config committed; `config.yaml` stays ignored.

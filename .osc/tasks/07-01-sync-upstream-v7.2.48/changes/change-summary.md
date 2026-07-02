@@ -2,35 +2,54 @@
 
 - Date: 2026-07-01
 - Owner(s): hewei
-- Status: Planning (closure to be filled after implementation)
+- Status: Implemented and verified locally
 - Related: `proposal.md`, `spec.md`, `tasks.md`, `regression-checklist.md`, `rollback-notes.md`
 - Upstream target: `upstream/main` @ `956ce7cf` (tag `v7.2.48`)
 - Last sync point: `21fad9db` (2026-05-21, task `05-22-merge-upstream-non-docker-changes`)
-- Pre-sync local `main`: `91dea825`
+- Pre-sync local implementation branch base: `307f5ff8`
 
-## What this change will do (planned)
+## What changed
 
-- Absorb `350` upstream commits (`21fad9db..upstream/main`, `664` files) bringing the fork to `v7.2.48`:
-  - New subsystems: plugin system (`internal/pluginhost`, `internal/pluginstore`, `sdk/pluginabi`, `sdk/pluginapi`, `sdk/pluginhost`, `sdk/pluginstore`, `examples/plugin/**`), request signature validation (`internal/signature`), safemode (`internal/safemode`), home plugins (`internal/homeplugins`), HTML sanitization (`internal/htmlsanitize`), HTTP fetch helper (`internal/httpfetch`), `cmd/fetch_codex_models`.
-  - Translator/runtime/registry/auth/management/SDK updates: `gpt-image-1.5` + direct image API proxy, video URL/auth handling, `disable-cooling` OpenAI compat config, `max` reasoning depth + `service_tiers` for Codex client models, `ResetQuota` endpoint, Codex WS↔SSE full transcript replay, Gemini/Claude/Antigravity fixes, model registry updates (Claude Sonnet 5, Gemini 3.5 Flash variants, deprecated removals), `rebuild_mid_system_message` config, per-auth OAuth model alias, persistent cooldown state.
-- Preserve local deployment/ops and CPA-Manager customizations on protected paths (`.github/**`, `Dockerfile`, `docker-*`, `deploy/**`, `.goreleaser.yml`) and in `internal/config/config.go` / `internal/managementasset/updater.go`.
-- Re-apply local behavior patches onto upstream's newer structure: Codex invalidated OAuth token failover, OpenAI compat `xhigh` thinking defaults, OpenAI stream null-usage chunks, DeepSeek models + reasoning echo, GPT-5.5 Codex free-tier filter, `host.docker.internal` gateway mapping, websocket body-log cap, string-form system prompt.
+- Absorbed upstream functional code through `v7.2.48`, including:
+  - Plugin system: `internal/pluginhost`, `internal/pluginstore`, `sdk/pluginabi`, `sdk/pluginapi`, `sdk/pluginhost`, `sdk/pluginstore`, and `examples/plugin/**`.
+  - New support modules: `internal/signature`, `internal/safemode`, `internal/homeplugins`, `internal/htmlsanitize`, `internal/httpfetch`, `cmd/fetch_codex_models`.
+  - Runtime/protocol updates: `gpt-image-1.5`, direct image API proxy, video URL/auth handling, `disable-cooling`, `max` reasoning depth, `service_tiers`, `ResetQuota`, Codex WS↔SSE replay, Claude/Gemini/Antigravity/xAI fixes, registry updates including Claude Sonnet 5.
+- Followed upstream removals for Amp and Gemini CLI code paths.
+- Preserved local protected deployment/ops paths and kept upstream CI/Docker/release changes out; only intentional protected-path edit is `deploy/README.md` updating the panel source to Plus.
+- Changed built-in management panel defaults/docs to `seakee/CPA-Manager-Plus`:
+  - `internal/config/config.go`
+  - `internal/managementasset/updater.go`
+  - `config.example.yaml`
+  - `README.md`, `README_CN.md`, `README_JA.md`
+  - `deploy/README.md`
+  - `docs/handoff/cpa-manager-fork-panel-release.md`
+- Re-ported local behavior patches onto upstream v7.2.48:
+  - Codex invalidated OAuth token disables bad auth and falls through to the next auth even when `max-retry-credentials=1`.
+  - OpenAI-compatible default thinking includes `none/low/medium/high/xhigh` and zero budget.
+  - OpenAI stream usage parser ignores `usage:null` and supports Responses usage fields.
+  - String-form Claude system prompts are preserved.
+  - WebSocket request/response body log growth is capped.
+  - DeepSeek static model definitions and reasoning echo support remain available.
+  - GPT-5.5 remains present for Codex team/plus/pro/static lookup and excluded from Codex free.
+  - xAI thinking efforts normalize `minimal→low` and `xhigh/max→high` for xAI Responses output.
 
 ## Why
 
-The fork needs upstream's latest functional code (plugin system, security/safemode, image/video, registry/auth/runtime fixes) while keeping local production deployment and CPA-Manager integration stable, following the established sync precedent.
+The fork needed upstream's latest functional code (plugin system, safemode/signature, image/video, registry/auth/runtime/translator fixes) while keeping local production deployment and CPA-Manager-Plus integration stable.
 
 ## Notable decisions
 
-- Conflict priority: protected path → local; CPA-Manager defaults → local; local behavior patches → local adapted to upstream structure; everything else → upstream.
-- `internal/translator/**` is in scope because the sync spans broader protocol/runtime changes (same precedent as `05-22-merge-upstream-non-docker-changes`).
-- Patch-apply with three-way fallback (not plain `git merge`) to avoid upstream deleting local `.osc` state.
-- Sync lands on `main`; remote push and production deployment are separate operations.
+- Conflict priority used: protected path → local; CPA-Manager-Plus defaults → local; local behavior patches → local behavior adapted to upstream structure; everything else → upstream.
+- `internal/translator/**` changes are part of this broad upstream sync, not a translator-only task.
+- Upstream-deleted Amp and Gemini CLI paths were removed instead of preserved.
+- Remote push and production deployment remain separate operations.
 
-## Validation (to be filled after implementation)
+## Validation
 
-- (pending) `go build -o test-output ./cmd/server && rm test-output`
-- (pending) `go test ./...`
-- (pending) focused local-behavior tests
-- (pending) protected-path diff empty
-- (pending) CPA-Manager defaults present
+- PASS: `git diff --name-only --diff-filter=U` = 0.
+- PASS: conflict-marker scan over Go/YAML/Markdown files.
+- PASS: `git diff --cached --check`.
+- PASS: `go build -o test-output ./cmd/server && rm test-output`.
+- PASS: `go test ./...`.
+- PASS: focused local-behavior tests for Codex invalidated OAuth failover, OpenAI compat xhigh thinking, null usage parsing, string system prompt, websocket log cap, registry/GPT-5.5, management usage, redisqueue, and OpenAI image/video handlers.
+- PASS: CPA-Manager-Plus defaults verified in code/config/docs.

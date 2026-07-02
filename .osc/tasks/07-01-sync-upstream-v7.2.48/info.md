@@ -4,7 +4,7 @@
 
 - Sync method: patch-apply with three-way fallback (precedent: `05-22-merge-upstream-non-docker-changes`, `04-24-merge-upstream-main-preserve-deploy`). Avoid plain `git merge upstream/main` because upstream lacks local `.osc` task/workflow files and would delete local workflow state.
 - Protected path set (never take upstream): `.github/**`, `Dockerfile`, `.dockerignore`, `docker-build.sh`, `docker-build.ps1`, `docker-compose*.yml`, `.env.cluster.example`, `deploy/**`, `.goreleaser.yml`.
-- CPA-Manager anchors: `internal/config/config.go` (`DefaultPanelGitHubRepository = "https://github.com/seakee/CPA-Manager"`), `internal/managementasset/updater.go` (`defaultManagementReleaseURL` / `defaultManagementFallbackURL` → `seakee/CPA-Manager`).
+- CPA-Manager anchors: `internal/config/config.go` (`DefaultPanelGitHubRepository = "https://github.com/seakee/CPA-Manager-Plus"`), `internal/managementasset/updater.go` (`defaultManagementReleaseURL` / `defaultManagementFallbackURL` → `seakee/CPA-Manager-Plus`).
 - Module path already `v7` on both branches (prior sync handled v6→v7), so no module-path migration this round.
 - `internal/translator/**` in scope as part of broader sync, not a translator-only task.
 

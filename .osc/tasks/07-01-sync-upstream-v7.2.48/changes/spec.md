@@ -31,7 +31,7 @@
 
 1. Upstream non-protected patch is applied; new upstream subsystems (`internal/pluginhost`, `internal/pluginstore`, `internal/signature`, `internal/safemode`, `internal/homeplugins`, `internal/htmlsanitize`, `internal/httpfetch`, `sdk/pluginabi`, `sdk/pluginapi`, `sdk/pluginhost`, `sdk/pluginstore`, `cmd/fetch_codex_models`, `examples/plugin/**`) are present. (Verify: `git ls-tree` / `git diff --name-only` spot checks.)
 2. Protected paths match pre-sync `HEAD`. (Verify: `git status --short -- .github Dockerfile .dockerignore docker-build.sh docker-build.ps1 'docker-compose*.yml' .env.cluster.example deploy .goreleaser.yml` is empty.)
-3. CPA-Manager defaults preserved. (Verify: `internal/config/config.go` still has `DefaultPanelGitHubRepository = "https://github.com/seakee/CPA-Manager"`; `internal/managementasset/updater.go` default release/fallback URLs point at `seakee/CPA-Manager`.)
+3. CPA-Manager defaults preserved. (Verify: `internal/config/config.go` still has `DefaultPanelGitHubRepository = "https://github.com/seakee/CPA-Manager-Plus"`; `internal/managementasset/updater.go` default release/fallback URLs point at `seakee/CPA-Manager-Plus`.)
 4. Local behavior patches preserved and green. (Verify: focused `go test` for Codex invalidated-token failover with `max-retry-credentials=1`, OpenAI compat xhigh thinking, OpenAI stream null usage, DeepSeek reasoning echo, GPT-5.5 Codex free-tier filter, string system prompt.)
 5. Repo formatted and conflict-free. (Verify: `gofmt -l` clean on changed Go files, `git diff --check`, no `<<<<<<<`/`=======`/`>>>>>>>` markers.)
 6. Full test suite passes. (Verify: `go test ./...`.)

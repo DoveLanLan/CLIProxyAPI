@@ -9,7 +9,7 @@
   - 本地落后上游主要体现在新模块：`internal/{pluginhost,pluginstore,signature,safemode,homeplugins,htmlsanitize,httpfetch}`、`sdk/{pluginabi,pluginapi,pluginhost,pluginstore}`、`cmd/fetch_codex_models`、`examples/plugin/**`。
 - 本地分叉点 `f1ba6151`（v6.9.36）以来，自有改动 `52` 个提交，分布在：
   - 部署/运维：`.github/workflows/**`、`Dockerfile`、`docker-compose*.yml`、`deploy/**`、`.goreleaser.yml`、`docker-build.sh`。
-  - CPA-Manager 集成：`internal/config/config.go`（`DefaultPanelGitHubRepository = seakee/CPA-Manager`）、`internal/managementasset/updater.go`（默认 release/fallback URL）、`config.example.yaml`、`deploy/compose.production.yml`、`docker-compose*.yml`、`.github/workflows/update-cpa-manager-image.yml`。
+  - CPA-Manager 集成：`internal/config/config.go`（`DefaultPanelGitHubRepository = seakee/CPA-Manager-Plus`）、`internal/managementasset/updater.go`（默认 release/fallback URL）、`config.example.yaml`、`deploy/compose.production.yml`、`docker-compose*.yml`、`.github/workflows/update-cpa-manager-image.yml`。
   - 协议/运行时定制：Codex OAuth 失效 token failover、OpenAI 兼容 xhigh thinking 默认值、OpenAI 流式 null usage chunks、DeepSeek 模型与 reasoning echo 归一化、GPT-5.5 Codex 支持、`host.docker.internal` 网关映射、websocket body log 增长上限、字符串 system prompt 保留。
 
 ## 目标架构
