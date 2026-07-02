@@ -35,6 +35,8 @@ services:
     restart: unless-stopped
     depends_on:
       - cli-proxy-api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       CPA_UPSTREAM_URL: ${CPA_MANAGER_CPA_URL:-http://cli-proxy-api:8317}
       CPA_MANAGEMENT_KEY: ${CPA_MANAGEMENT_KEY:-}
