@@ -53,3 +53,36 @@ The fork needed upstream's latest functional code (plugin system, safemode/signa
 - PASS: `go test ./...`.
 - PASS: focused local-behavior tests for Codex invalidated OAuth failover, OpenAI compat xhigh thinking, null usage parsing, string system prompt, websocket log cap, registry/GPT-5.5, management usage, redisqueue, and OpenAI image/video handlers.
 - PASS: CPA-Manager-Plus defaults verified in code/config/docs.
+
+---
+
+## Addendum: Remove Legacy CPA-Manager from Production Deploy
+
+- Date: 2026-07-02
+- Status: Implemented and verified locally
+
+### What changed
+
+- Removed the legacy `cpa-manager` service from `deploy/compose.production.yml`, including its host port binding, environment, volume, and dependency on `cli-proxy-api`.
+- Removed stale production env sample entries for the retired service from `deploy/.env.example`.
+- Deleted `.github/workflows/update-cpa-manager-image.yml`, which only updated/restarted the obsolete service.
+- Updated `deploy/README.md` so production management is documented through the CLIProxyAPI private management URL and CPA Manager Plus panel source.
+- Updated `.osc/spec/project-spec.md` and this task's change artifacts for the deployment hotfix.
+
+### Why
+
+GitHub Actions failed during `Deploy production stack` because the old `cpa-manager` service attempted to bind `100.67.99.9:18318`, but that port is already allocated by the current CPA Manager Plus setup. The production stack should no longer manage or start the legacy standalone CPA-Manager container.
+
+### Notable decisions
+
+- Kept `deploy/scripts/remote-deploy.sh` unchanged because it already runs `docker compose up -d --remove-orphans`; after the updated compose file is installed, the old compose-managed service should be removed as an orphan.
+- Left local development `docker-compose.yml` and `docker-compose.example.yml` unchanged because this hotfix is scoped to production deploy.
+- Did not remove any remote `data/cpa-manager/` data; stale data can be backed up or removed manually on the VPS if needed.
+
+### Validation
+
+- PASS: stale production reference scan returned `no stale legacy CPA-Manager production refs`.
+- PASS: `.github/workflows/update-cpa-manager-image.yml` is absent.
+- PASS: `docker compose -f deploy/compose.production.yml --env-file deploy/.env.example config --services` returned `cli-proxy-api`.
+- PASS: `docker compose -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml --env-file deploy/.env.example config --services` returned `split-proxy` and `cli-proxy-api`.
+- PASS: `go build -o test-output ./cmd/server && rm test-output`.

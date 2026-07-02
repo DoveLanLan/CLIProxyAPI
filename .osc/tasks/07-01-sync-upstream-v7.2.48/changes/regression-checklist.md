@@ -57,3 +57,36 @@
 ## Residual Risk
 
 - Large upstream sync touching runtime routing, translators, SDK handlers, registry data, and management APIs. Automated tests and build pass, but production config should still be reviewed before rollout because upstream introduced new config fields, provider behavior, and the plugin subsystem.
+
+---
+
+## Addendum Regression: Remove Legacy CPA-Manager from Production Deploy
+
+- Date: 2026-07-02
+- Related: `spec.md`, `tasks.md`
+
+### Gates
+
+- Production compose render: `docker compose -f deploy/compose.production.yml --env-file deploy/.env.example config --services`
+- Split-proxy compose render: `docker compose -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml --env-file deploy/.env.example config --services`
+- Stale production reference scan: `rg -n "Usage Service|TAILSCALE_CPA_MANAGER_PORT|18318|CPA_MANAGER_IMAGE|CPA_MANAGER_USAGE_QUERY_LIMIT|cpa-manager" deploy .github/workflows`
+- Server compile: `go build -o test-output ./cmd/server && rm test-output`
+
+### Executed
+
+- [x] Base production compose rendered successfully and listed only `cli-proxy-api`.
+- [x] Split-proxy production compose rendered successfully and listed `split-proxy` plus `cli-proxy-api`.
+- [x] Stale legacy production reference scan returned no matches.
+- [x] Legacy CPA-Manager image update workflow is absent.
+- [x] Server compile gate passed.
+
+### Manual Checks
+
+- [x] Confirmed `deploy/compose.production.yml` no longer binds host port `18318`.
+- [x] Confirmed `deploy/.env.example` no longer documents unused `CPA_MANAGER_*` or `TAILSCALE_CPA_MANAGER_PORT` entries.
+- [x] Confirmed `deploy/README.md` points operators to the CPA Manager Plus panel through the existing private management URL.
+
+### Residual Risk
+
+- If the VPS has a manually created external container on the old port, this repo no longer manages it. The next deploy should still succeed because this stack no longer binds that port.
+- If the previous `cpa-manager` container was created by this compose project, `--remove-orphans` should remove it on the next deploy. If it was created outside the compose project, manual cleanup may still be needed.

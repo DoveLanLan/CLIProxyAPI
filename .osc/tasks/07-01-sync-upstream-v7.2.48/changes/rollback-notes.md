@@ -32,3 +32,32 @@
 ## Risk notes
 
 - Rolling back removes upstream plugin system, signature, safemode, homeplugins, image/video, `gpt-image-1.5`, `disable-cooling`, `max` reasoning, `ResetQuota`, Codex WS↔SSE replay, and translator/runtime/registry/auth fixes brought in by `v7.2.48`.
+
+---
+
+## Addendum Rollback: Remove Legacy CPA-Manager from Production Deploy
+
+- Date: 2026-07-02
+- Related: `proposal.md`, `spec.md`, `tasks.md`
+
+### Rollback strategy
+
+Revert the hotfix commit or restore these files from the previous revision:
+
+- `.github/workflows/update-cpa-manager-image.yml`
+- `deploy/compose.production.yml`
+- `deploy/.env.example`
+- `deploy/README.md`
+- `.osc/spec/project-spec.md`
+- `.osc/tasks/07-01-sync-upstream-v7.2.48/changes/*`
+
+### Data / migration considerations
+
+- No data migration was performed.
+- Existing VPS `data/cpa-manager/` contents, if present, are untouched by this repository change.
+- Rolling back will make production compose try to start the old `cpa-manager` service and bind its old host port again, so rollback is expected to reintroduce the original port-conflict risk unless the external owner of that port is stopped or moved.
+
+### Operational notes
+
+- The safe forward path is to keep this hotfix and redeploy; `docker compose up -d --remove-orphans` should remove the old compose-managed container.
+- If rollback is required, verify the old port is free before rerunning production deploy.

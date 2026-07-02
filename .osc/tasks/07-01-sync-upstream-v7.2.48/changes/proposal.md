@@ -74,3 +74,60 @@ Conflict resolution priority:
 ## Open Questions (max 3)
 
 - None. The user scoped this as "merge upstream v7.2.48 + protect deploy/CPA-Manager," matching the established sync precedent.
+
+---
+
+## Addendum: Remove Legacy CPA-Manager from Production Deploy
+
+- Date: 2026-07-02
+- Owner(s): hewei
+- Stakeholders: fork maintainer, production operator
+- Status: Proposed
+
+### Context / Problem
+
+The production deploy workflow failed while running `Deploy production stack` because Docker could not bind `100.67.99.9:18318` for the `cpa-manager` container:
+
+```text
+Bind for 100.67.99.9:18318 failed: port is already allocated
+```
+
+The current production setup now uses CPA Manager Plus through the CLIProxyAPI management panel configuration instead of the legacy standalone CPA-Manager container. Keeping the old `cpa-manager` service in `deploy/compose.production.yml` makes every deploy try to start an obsolete container on a port that is already owned by the new setup.
+
+### Goals (Why/What)
+
+- Stop the production stack from pulling or starting the legacy `cpa-manager` service.
+- Keep `cli-proxy-api` and optional split-proxy deployment behavior unchanged.
+- Let `docker compose up -d --remove-orphans` remove the old compose-managed `cpa-manager` container on the next successful deploy.
+- Remove or neutralize automation that updates/restarts the obsolete `cpa-manager` image.
+- Update production docs and environment examples so they describe CPA Manager Plus as the management panel source, not a separate CPA-Manager Usage Service.
+
+### Constraints
+
+- Do not change Go runtime behavior for this deploy hotfix.
+- Do not touch `internal/translator/**`.
+- Preserve Tailscale-only management access on `${TAILSCALE_MANAGEMENT_PORT:-18317}`.
+- Do not remove local runtime data on the VPS; stale `data/cpa-manager/` can remain for manual backup/removal.
+
+### Non-goals
+
+- Do not deploy or configure CPA Manager Plus as a separate Docker service in this repository.
+- Do not change public Cloudflare or gateway routing.
+- Do not migrate historical CPA-Manager SQLite data.
+
+### Proposed Approach (high-level)
+
+Remove the legacy `cpa-manager` service and its production-only environment knobs from the production compose assets, delete the obsolete CPA-Manager image update workflow, and update deployment documentation to make `cli-proxy-api` management access the only service managed by this stack. The existing deploy script already uses `--remove-orphans`, so the next production deploy should remove the old compose-managed container after the updated compose file is installed.
+
+### Risks & Mitigations
+
+- Risk: An operator still depends on the old standalone usage service.
+  - Mitigation: Document that this stack no longer manages it; external services must be deployed independently and use a non-conflicting port.
+- Risk: Removing the workflow surprises users who manually updated the old CPA-Manager image through GitHub Actions.
+  - Mitigation: The repository no longer manages that container, so retaining the workflow would be actively misleading.
+- Risk: A stale non-compose container still owns `18318`.
+  - Mitigation: The production deploy will no longer bind `18318`; manual cleanup of external containers is outside this repository change.
+
+### Open Questions (max 3)
+
+- None. The production failure and current CPA Manager Plus usage establish the desired behavior.

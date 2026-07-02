@@ -63,3 +63,67 @@
 - Inputs/outputs: upstream API route additions (management plugin endpoints, `ResetQuota`, image/video, health) are accepted; public `/v1`, `/v1beta` compatibility follows upstream.
 - States/errors: keep upstream error handling unless it conflicts with local user-facing behavior (Codex failover messaging, xhigh thinking defaults).
 - Telemetry/logging: upstream logging changes accepted outside protected files; secret masking preserved.
+
+---
+
+## Addendum: Remove Legacy CPA-Manager from Production Deploy
+
+- Date: 2026-07-02
+- Owner(s): hewei
+- Related: `proposal.md`, `tasks.md`
+
+### Repo Snapshot
+
+- Modules/components: production deployment assets live under `deploy/`; GitHub production automation lives under `.github/workflows/`; runtime server remains `cmd/server` and is not changed by this hotfix. Confidence: High. Evidence: `deploy/compose.production.yml`, `deploy/scripts/remote-deploy.sh`, `.github/workflows/deploy-production.yml`.
+- Toolchains: production deploy packages `deploy/` and runs `scripts/remote-deploy.sh`; the script executes `docker compose pull`, `docker compose up -d --remove-orphans`, and gateway nginx reload. Confidence: High. Evidence: `.github/workflows/deploy-production.yml`, `deploy/scripts/remote-deploy.sh`.
+- Quality/CI: no Go code changes expected; validation should include compose config rendering and the standard server compile gate if any Go files are touched. Confidence: High. Evidence: `AGENTS.md`, `.github/workflows/pr-test-build.yml`.
+
+### Scope
+
+#### In scope
+
+- `deploy/compose.production.yml`: remove the legacy `cpa-manager` service.
+- `deploy/.env.example`: remove obsolete production env vars used only by the removed service.
+- `deploy/README.md`: update topology, bootstrap, and management access docs for CPA Manager Plus via the CLIProxyAPI management panel.
+- `.github/workflows/update-cpa-manager-image.yml`: remove obsolete automation for the retired service.
+- `.osc/spec/project-spec.md` and task change artifacts: record the hotfix.
+
+#### Out of scope
+
+- Go runtime/source behavior.
+- `docker-compose.yml` and `docker-compose.example.yml` for local development.
+- Remote VPS state cleanup beyond compose orphan removal.
+- CPA Manager Plus external deployment mechanics, if any.
+
+### Acceptance Criteria (testable)
+
+1. Production compose no longer defines `cpa-manager` and no longer binds `${TAILSCALE_CPA_MANAGER_PORT:-18318}`. (Verify: `rg -n "cpa-manager|TAILSCALE_CPA_MANAGER_PORT|18318" deploy/compose.production.yml deploy/.env.example` returns no matches.)
+2. Production deploy still defines `cli-proxy-api` and the external `${GATEWAY_NETWORK:-vps-gateway}` network. (Verify: `docker compose -f deploy/compose.production.yml --env-file deploy/.env.example config --services` includes `cli-proxy-api` only for the base file.)
+3. Obsolete CPA-Manager image update workflow is removed. (Verify: `.github/workflows/update-cpa-manager-image.yml` is absent.)
+4. Deployment docs no longer instruct operators to expose the legacy CPA-Manager Usage Service. (Verify: `rg -n "Usage Service|TAILSCALE_CPA_MANAGER_PORT|CPA_MANAGER_IMAGE|CPA_MANAGER_USAGE_QUERY_LIMIT|18318" deploy/README.md` returns no matches.)
+5. Standard Go compile gate remains green if Go files are touched. (Verify: `go build -o test-output ./cmd/server && rm test-output`; skip if only docs/deploy files change.)
+
+### Behavior / Requirements
+
+- The base production stack manages only `cli-proxy-api`; optional split-proxy remains controlled by `ENABLE_SPLIT_PROXY=true`.
+- CPA Manager Plus is reached through the configured CLIProxyAPI management panel on the private management port.
+- The deploy script's existing `--remove-orphans` behavior should remove the previous compose-managed `cpa-manager` container after the updated compose file reaches the server.
+- No host port `18318` is reserved by this production stack after the change.
+
+### Edge Cases
+
+- If a manually created external container already uses `18318`, deploy should still succeed because this stack no longer binds that port.
+- If a stale compose-managed `cpa-manager` container exists from older deploys, `--remove-orphans` should remove it when the compose project name is unchanged.
+- If an operator still needs a standalone usage collector, it must be managed outside this repository and must not reuse this stack's service name.
+
+### Compatibility Notes
+
+- Backwards compatibility: existing CLIProxyAPI config and auth volume paths stay unchanged.
+- Data/migrations: no data migration; old `data/cpa-manager/` contents are left untouched on the server.
+- Config/flags: `CPA_MANAGER_*` and `TAILSCALE_CPA_MANAGER_PORT` production `.env` entries become unused and can be manually removed from the VPS `.env`.
+
+### API/UX Decisions
+
+- Inputs/outputs: no API changes.
+- States/errors: production deploy should no longer fail on `Bind for 100.67.99.9:18318 failed: port is already allocated`.
+- Telemetry/logging: no logging changes.

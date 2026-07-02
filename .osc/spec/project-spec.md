@@ -22,14 +22,14 @@ This repository is not a conventional browser frontend project. The interactive 
 
 - Repo root: `/Volumes/DevDrive/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
-- Current task: `.osc/tasks/05-22-merge-upstream-non-docker-changes`
-- Immediate implication: this upstream sync must update that task's `changes/` artifacts before non-`.osc/` edits.
+- Current task: `.osc/tasks/07-01-sync-upstream-v7.2.48`
+- Immediate implication: deployment hotfixes must update that task's `changes/` artifacts before non-`.osc/` edits.
 
 **Repo Snapshot**
 - **Modules/Components:** `cmd/server` is the runnable server entrypoint; `internal/{api,auth,cmd,config,logging,managementasset,runtime,store,tui,usage,watcher,wsrelay,...}` contains server-only runtime code; `sdk/{api,auth,cliproxy,config,logging,translator}` is the reusable embedding surface; `docs/`, `examples/`, and `test/` hold consumer docs, samples, and regression coverage. (confidence: High) — evidence: `README.md`, `cmd/server/main.go`, `internal/`, `sdk/`, `docs/`, `examples/`, `test/`
 - **Toolchains:** build uses Go modules plus `go build ./cmd/server`, a multi-stage Docker image, and GoReleaser archives (High); tests exist both as package tests and top-level regressions under `test/`, but the shallow CI inventory only enforces build on pull requests (Medium); no dedicated lint/staticcheck config was found at depth <= 2, so explicit source-format enforcement is mostly standard Go tooling plus review convention (Low). — evidence: `go.mod`, `Dockerfile`, `docker-compose.yml`, `.goreleaser.yml`, `.github/workflows/pr-test-build.yml`, `.github/workflows/release.yaml`, `.github/workflows/docker-image.yml`
 - **Style/Format Enforcement:** the strongest enforced process rules are the `osc` artifact-first workflow, protected `internal/translator/**` PR boundary, and comment-preserving config persistence through management handlers. (confidence: Medium) — evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.github/workflows/pr-path-guard.yml`, `internal/api/handlers/management/config_basic.go`, `internal/api/handlers/management/handler.go`
-- **CI Gates/Expectations:** pull requests must compile `./cmd/server`; pull requests touching `internal/translator/**` are rejected; tag pushes publish GoReleaser artifacts and Docker images with embedded version metadata. (confidence: High) — evidence: `.github/workflows/pr-test-build.yml`, `.github/workflows/pr-path-guard.yml`, `.github/workflows/release.yaml`, `.github/workflows/docker-image.yml`, `.goreleaser.yml`, `Dockerfile`
+- **CI Gates/Expectations:** pull requests must compile `./cmd/server`; pull requests touching `internal/translator/**` are rejected; main/tag pushes publish Docker images, and successful main Docker builds trigger the production deploy workflow. Tag pushes publish GoReleaser artifacts with embedded version metadata. (confidence: High) — evidence: `.github/workflows/pr-test-build.yml`, `.github/workflows/pr-path-guard.yml`, `.github/workflows/docker-image.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/release.yaml`, `.goreleaser.yml`, `Dockerfile`, `deploy/scripts/remote-deploy.sh`
 - **Open Questions (max 1):** None. The current repo state is sufficient to continue spec work, but later code changes still require task creation/selection because `current_task` is empty.
 
 ## Product Surfaces
@@ -89,7 +89,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 3. Follow the existing lowercase package naming and descriptive file suffix patterns such as `*_test.go`, `*_handlers.go`, `*_login.go`, and `*_store.go`. — Evidence: `internal/cmd/`, `internal/api/handlers/management/`, `sdk/api/handlers/`, `internal/store/` (Inferred; confidence: Medium)
 
 #### C) Code style & patterns
-1. Target Go `1.26` and keep the module path `github.com/router-for-me/CLIProxyAPI/v6` intact when changing imports, scripts, or release metadata. — Evidence: `go.mod`, `.github/workflows/pr-test-build.yml`, `.github/workflows/release.yaml` (Documented; confidence: High)
+1. Target Go `1.26` and keep the module path `github.com/router-for-me/CLIProxyAPI/v7` intact when changing imports, scripts, or release metadata. — Evidence: `go.mod`, `.github/workflows/pr-test-build.yml`, `.github/workflows/release.yaml` (Documented; confidence: High)
 1.1. Never commit `config.yaml` (or any custom config file) to the repository, as it contains sensitive API keys, secrets, and environment-specific settings. Use `config.example.yaml` as the template for configuration. — Evidence: `.gitignore` excludes `config.yaml` (Documented; confidence: High)
 2. Prefer hot-reloadable config/auth flows over restart-only logic. The service and watcher design already support incremental auth updates and config reloads. — Evidence: `docs/sdk-watcher.md`, `sdk/cliproxy/service.go`, `sdk/cliproxy/watcher.go`, `internal/watcher/` (Documented; confidence: Medium)
 3. Persist repeatable repository rules in `.osc/spec/` and keep task-specific change plans in `.osc/tasks/<task-dir>/changes/`, not in chat alone. — Evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.osc/spec/README.md` (Documented; confidence: High)
@@ -109,7 +109,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 ### Top 7 Constraints
 
-- Constraint 1: Current source changes should stay within `.osc/tasks/05-22-merge-upstream-non-docker-changes` unless a new task is selected.
+- Constraint 1: Current source changes should stay within `.osc/tasks/07-01-sync-upstream-v7.2.48` unless a new task is selected.
 - Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist or are updated, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
 - Constraint 3: Required repo artifacts do not live only in chat: baseline rules go in `.osc/spec/project-spec.md`, task change packages go in `.osc/tasks/<task-dir>/changes/`, and quality results go in `.osc/quality-gate.md`.
 - Constraint 4: This repository is primarily a Go proxy/server and embeddable SDK, not a bundled browser frontend. UI work in-tree normally means Bubble Tea TUI work or management asset integration.

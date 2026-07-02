@@ -60,3 +60,39 @@
 - Module path is already `v7` on both branches (prior sync handled the v6→v7 bump), so no module-path migration this round.
 - Upstream removed Amp and Gemini CLI paths; this sync follows upstream removal.
 - `CPA-Manager-Plus` is the current built-in panel source; `seakee/CPA-Manager-Plus` latest release was verified to include `management.html`.
+
+---
+
+## Addendum Checklist: Remove Legacy CPA-Manager from Production Deploy
+
+- Date: 2026-07-02
+- Owner(s): hewei
+- Related: `spec.md`, `proposal.md`
+
+### Assumptions
+
+- Production now uses CPA Manager Plus through the CLIProxyAPI management panel.
+- The legacy standalone `cpa-manager` service is no longer required in this repository's production compose stack.
+- The deploy script will keep using the existing `docker compose up -d --remove-orphans` flow.
+
+### Checklist
+
+- [x] 9) Remove legacy production service
+  - Target: `deploy/compose.production.yml`
+  - Change: remove the `cpa-manager` service, port binding, environment, volume, and dependency on the CLIProxyAPI service.
+  - Verify: base production compose renders only `cli-proxy-api`.
+
+- [x] 10) Retire obsolete image-update automation
+  - Target: `.github/workflows/update-cpa-manager-image.yml`
+  - Change: remove the workflow that updates and restarts the old CPA-Manager service.
+  - Verify: file is absent and no deploy workflow references it.
+
+- [x] 11) Update production docs and env sample
+  - Target: `deploy/README.md`, `deploy/.env.example`
+  - Change: remove legacy CPA-Manager Usage Service references and stale `CPA_MANAGER_*` / `TAILSCALE_CPA_MANAGER_PORT` env entries.
+  - Verify: grep shows no stale legacy service instructions in production deploy docs.
+
+- [x] 12) Validate deploy assets
+  - Target: `deploy/` and `.github/workflows/`
+  - Change: run static checks for compose rendering and stale references.
+  - Verify: `docker compose -f deploy/compose.production.yml --env-file deploy/.env.example config --services`; `rg -n "cpa-manager|TAILSCALE_CPA_MANAGER_PORT|18318|CPA_MANAGER_IMAGE|CPA_MANAGER_USAGE_QUERY_LIMIT" deploy .github/workflows`.

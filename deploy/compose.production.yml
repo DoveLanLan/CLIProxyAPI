@@ -16,26 +16,6 @@ services:
     networks:
       - proxy
 
-  cpa-manager:
-    image: ${CPA_MANAGER_IMAGE:-seakee/cpa-manager:latest}
-    container_name: cpa-manager
-    restart: unless-stopped
-    depends_on:
-      - cli-proxy-api
-    environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      CPA_UPSTREAM_URL: ${CPA_MANAGER_CPA_URL:-http://cli-proxy-api:8317}
-      CPA_MANAGEMENT_KEY: ${CPA_MANAGEMENT_KEY:-}
-      USAGE_QUERY_LIMIT: ${CPA_MANAGER_USAGE_QUERY_LIMIT:-100}
-    ports:
-      - "${TAILSCALE_BIND_IP:?set TAILSCALE_BIND_IP}:${TAILSCALE_CPA_MANAGER_PORT:-18318}:18317"
-    expose:
-      - "18317"
-    volumes:
-      - ./data/cpa-manager:/data
-    networks:
-      - proxy
-
 networks:
   proxy:
     external: true
