@@ -182,7 +182,9 @@ func LookupModelInfo(modelID string, provider ...string) *ModelInfo {
 	}
 
 	if info := GetGlobalRegistry().GetModelInfo(modelID, p); info != nil {
-		return cloneModelInfo(info)
+		// GetModelInfo already applied built-in thinking overrides, but clone
+		// defensively for the caller.
+		return info
 	}
 	return cloneModelInfo(LookupStaticModelInfo(modelID))
 }
@@ -1095,6 +1097,10 @@ func (r *ModelRegistry) GetModelProviders(modelID string) []string {
 }
 
 // GetModelInfo returns ModelInfo, prioritizing provider-specific definition if available.
+//
+// Built-in thinking overrides (e.g. DeepSeek's minimal/low/medium/high/max) are
+// applied to the returned info so authoritative levels win over the
+// OpenAI-compatibility fallback or remote catalog on every lookup path.
 func (r *ModelRegistry) GetModelInfo(modelID, provider string) *ModelInfo {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
@@ -1104,15 +1110,31 @@ func (r *ModelRegistry) GetModelInfo(modelID, provider string) *ModelInfo {
 			if reg.Providers != nil {
 				if count, ok := reg.Providers[provider]; ok && count > 0 {
 					if info, ok := reg.InfoByProvider[provider]; ok && info != nil {
-						return cloneModelInfo(info)
+						return applyBuiltinThinkingOverride(cloneModelInfo(info))
 					}
 				}
 			}
 		}
 		// Fallback to global info (last registered)
-		return cloneModelInfo(reg.Info)
+		return applyBuiltinThinkingOverride(cloneModelInfo(reg.Info))
 	}
 	return nil
+}
+
+// applyBuiltinThinkingOverride applies authoritative built-in thinking
+// overrides (e.g. DeepSeek's minimal/low/medium/high/max) to a cloned model
+// info returned from the registry. This guarantees the correct levels win over
+// whatever the OpenAI-compatibility fallback or remote catalog shipped, on
+// every lookup path including dynamic registry hits. Returns the input
+// unchanged when no override applies.
+func applyBuiltinThinkingOverride(info *ModelInfo) *ModelInfo {
+	if info == nil {
+		return nil
+	}
+	if override := DeepSeekThinkingOverride(info.ID); override != nil {
+		info.Thinking = override
+	}
+	return info
 }
 
 // convertModelToMap converts ModelInfo to the appropriate format for different handler types

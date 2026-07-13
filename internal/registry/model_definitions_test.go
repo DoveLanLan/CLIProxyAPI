@@ -168,6 +168,45 @@ func TestDeepSeekThinkingOverrideCoversStaticLookup(t *testing.T) {
 	}
 }
 
+// TestDeepSeekOverrideWinsOverRegisteredXHighLevels verifies that the
+// authoritative DeepSeek thinking override wins even when an auth client
+// explicitly registers the model with the wrong (xhigh-bearing) levels. This
+// mirrors the 火山 Coding plan openai-compatibility deployment where the
+// fallback resolved xhigh and effort=max was clamped to xhigh, which DeepSeek
+// rejects. The dynamic registry lookup (GetModelInfo/LookupModelInfo) must
+// return the overridden levels.
+func TestDeepSeekOverrideWinsOverRegisteredXHighLevels(t *testing.T) {
+	for _, id := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+		t.Run(id, func(t *testing.T) {
+			clientID := "test-ds-override-" + id
+			GetGlobalRegistry().RegisterClient(clientID, "openai-compatibility", []*ModelInfo{
+				{ID: id, Object: "model", Type: "openai-compatibility", DisplayName: id,
+					Thinking: &ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh"}}},
+			})
+			t.Cleanup(func() { GetGlobalRegistry().UnregisterClient(clientID) })
+
+			info := LookupModelInfo(id, "openai-compatibility")
+			if info == nil || info.Thinking == nil {
+				t.Fatalf("dynamic lookup: %s missing thinking", id)
+			}
+			for _, level := range info.Thinking.Levels {
+				if level == "xhigh" {
+					t.Fatalf("dynamic lookup: %s override did not win, still exposes xhigh %v", id, info.Thinking.Levels)
+				}
+			}
+			found := false
+			for _, level := range info.Thinking.Levels {
+				if level == "max" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("dynamic lookup: %s missing max after override, got %v", id, info.Thinking.Levels)
+			}
+		})
+	}
+}
+
 func TestAntigravityWebSearchModelForRequiresRequestedModelCapability(t *testing.T) {
 	registryRef := GetGlobalRegistry()
 	registryRef.RegisterClient("test-antigravity-websearch-route", "antigravity", []*ModelInfo{

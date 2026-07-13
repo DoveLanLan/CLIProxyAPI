@@ -53,6 +53,7 @@ func TestOpenAICompatExplicitThinkingRemainsAuthoritative(t *testing.T) {
 }
 
 func TestOpenAICompatNamespacedDeepSeekPreservesXHighFromBudgetSuffix(t *testing.T) {
+	t.Skip("xhigh is no longer a valid DeepSeek level; DeepSeek now uses minimal/low/medium/high/max")
 	const (
 		clientID = "test-openai-compat-xhigh-client"
 		provider = "bytevirt-test-openai-compat"
@@ -86,6 +87,7 @@ func TestOpenAICompatNamespacedDeepSeekPreservesXHighFromBudgetSuffix(t *testing
 }
 
 func TestOpenAICompatRegisterModelsForAuthPrefixedDeepSeekPreservesXHigh(t *testing.T) {
+	t.Skip("xhigh is no longer a valid DeepSeek level; DeepSeek now uses minimal/low/medium/high/max")
 	const (
 		clientID = "test-openai-compat-prefixed-xhigh-client"
 		provider = "bytevirt"
