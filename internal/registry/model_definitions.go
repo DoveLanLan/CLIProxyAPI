@@ -98,16 +98,32 @@ func GetDeepSeekModels() []*ModelInfo {
 // DeepSeek models, matching the values accepted by the upstream API.
 var deepseekThinkingLevels = []string{"minimal", "low", "medium", "high", "max"}
 
+// deepseekThinkingOverrides is the authoritative thinking configuration for
+// DeepSeek models keyed by model ID. It wins over both the embedded and the
+// remote models catalog so the proxy never emits an unsupported
+// reasoning_effort (e.g. xhigh) to DeepSeek.
+var deepseekThinkingOverrides = map[string]*ThinkingSupport{
+	"deepseek-v4-flash": {Levels: deepseekThinkingLevels},
+	"deepseek-v4-pro":   {Levels: deepseekThinkingLevels},
+}
+
+// DeepSeekThinkingOverride returns the authoritative thinking configuration for
+// the given DeepSeek model ID, or nil if the ID has no built-in override.
+//
+// This is the single source of truth consulted by static lookups
+// (LookupStaticModelInfo) and channel accessors (GetDeepSeekModels) so the
+// correct levels surface everywhere a thinking config is resolved, including
+// the OpenAI-compatibility thinking fallback in sdk/cliproxy.
+func DeepSeekThinkingOverride(modelID string) *ThinkingSupport {
+	return deepseekThinkingOverrides[strings.ToLower(strings.TrimSpace(modelID))]
+}
+
 // WithDeepSeekBuiltins overrides thinking configuration for DeepSeek models so
 // the levels match the upstream API. Unlike remote model updates, these
 // overrides always win, preventing unsupported reasoning_effort values
 // (e.g. xhigh) from being sent upstream.
 func WithDeepSeekBuiltins(models []*ModelInfo) []*ModelInfo {
-	override := map[string]*ThinkingSupport{
-		"deepseek-v4-flash": {Levels: deepseekThinkingLevels, ZeroAllowed: false},
-		"deepseek-v4-pro":   {Levels: deepseekThinkingLevels, ZeroAllowed: false},
-	}
-	if len(override) == 0 {
+	if len(deepseekThinkingOverrides) == 0 {
 		return models
 	}
 	out := make([]*ModelInfo, 0, len(models))
@@ -115,7 +131,7 @@ func WithDeepSeekBuiltins(models []*ModelInfo) []*ModelInfo {
 		if model == nil {
 			continue
 		}
-		thinking, ok := override[model.ID]
+		thinking, ok := deepseekThinkingOverrides[model.ID]
 		if !ok {
 			out = append(out, model)
 			continue
@@ -372,7 +388,16 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 	for _, models := range allModels {
 		for _, m := range models {
 			if m != nil && m.ID == modelID {
-				return cloneModelInfo(m)
+				cloned := cloneModelInfo(m)
+				// Apply built-in thinking overrides so authoritative per-model
+				// levels (e.g. DeepSeek's minimal/low/medium/high/max) win over
+				// whatever the embedded or remote catalog shipped. Without this,
+				// callers resolving thinking via the static lookup path (e.g. the
+				// OpenAI-compatibility fallback) would see stale levels like xhigh.
+				if override := DeepSeekThinkingOverride(cloned.ID); override != nil {
+					cloned.Thinking = override
+				}
+				return cloned
 			}
 		}
 	}

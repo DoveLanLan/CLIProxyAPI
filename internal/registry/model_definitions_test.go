@@ -131,9 +131,37 @@ func TestDeepSeekBuiltinsUseUpstreamLevels(t *testing.T) {
 					t.Fatalf("%s thinking level %d mismatch: got %q, want %q", id, i, model.Thinking.Levels[i], level)
 				}
 			}
-			for _, level := range model.Thinking.Levels {
+		})
+	}
+}
+
+// TestDeepSeekThinkingOverrideCoversStaticLookup verifies that the OpenAI
+// compatibility thinking fallback path (registry.LookupStaticModelInfo, used by
+// sdk/cliproxy when a config model has no explicit thinking block) returns the
+// authoritative DeepSeek levels rather than whatever the embedded/remote
+// catalog ships.
+func TestDeepSeekThinkingOverrideCoversStaticLookup(t *testing.T) {
+	for _, id := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+		t.Run(id, func(t *testing.T) {
+			info := LookupStaticModelInfo(id)
+			if info == nil {
+				t.Fatalf("expected LookupStaticModelInfo to find %s", id)
+			}
+			if info.Thinking == nil {
+				t.Fatalf("expected %s to support thinking", id)
+			}
+			for _, level := range info.Thinking.Levels {
 				if level == "xhigh" {
-					t.Fatalf("%s must not expose unsupported level xhigh, got %v", id, model.Thinking.Levels)
+					t.Fatalf("%s static lookup must not expose xhigh, got %v", id, info.Thinking.Levels)
+				}
+			}
+			want := []string{"minimal", "low", "medium", "high", "max"}
+			if len(info.Thinking.Levels) != len(want) {
+				t.Fatalf("%s static lookup levels mismatch: got %v, want %v", id, info.Thinking.Levels, want)
+			}
+			for i, level := range want {
+				if info.Thinking.Levels[i] != level {
+					t.Fatalf("%s static lookup level %d mismatch: got %q, want %q", id, i, info.Thinking.Levels[i], level)
 				}
 			}
 		})
