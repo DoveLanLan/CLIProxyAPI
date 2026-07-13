@@ -2242,7 +2242,8 @@
           "low",
           "medium",
           "high",
-          "xhigh"
+          "xhigh",
+          "max"
         ],
         "zero_allowed": true
       }
@@ -2263,7 +2264,8 @@
           "low",
           "medium",
           "high",
-          "xhigh"
+          "xhigh",
+          "max"
         ],
         "zero_allowed": true
       }
