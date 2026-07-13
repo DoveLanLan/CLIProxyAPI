@@ -108,6 +108,38 @@ func TestWithXAIBuiltinsIncludesVideoPreviewModel(t *testing.T) {
 	t.Fatalf("expected xAI builtin model %s", xaiBuiltinVideo15PreviewModelID)
 }
 
+// TestDeepSeekBuiltinsUseUpstreamLevels verifies that DeepSeek models always
+// expose the reasoning_effort levels accepted by the upstream API, and never
+// the unsupported "xhigh" level, regardless of what the remote model catalog
+// ships.
+func TestDeepSeekBuiltinsUseUpstreamLevels(t *testing.T) {
+	for _, id := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+		t.Run(id, func(t *testing.T) {
+			model := findModelInfo(GetDeepSeekModels(), id)
+			if model == nil {
+				t.Fatalf("expected %s in static deepseek models", id)
+			}
+			if model.Thinking == nil {
+				t.Fatalf("expected %s to support thinking", id)
+			}
+			want := []string{"minimal", "low", "medium", "high", "max"}
+			if len(model.Thinking.Levels) != len(want) {
+				t.Fatalf("%s thinking level count mismatch: got %d (%v), want %d (%v)", id, len(model.Thinking.Levels), model.Thinking.Levels, len(want), want)
+			}
+			for i, level := range want {
+				if model.Thinking.Levels[i] != level {
+					t.Fatalf("%s thinking level %d mismatch: got %q, want %q", id, i, model.Thinking.Levels[i], level)
+				}
+			}
+			for _, level := range model.Thinking.Levels {
+				if level == "xhigh" {
+					t.Fatalf("%s must not expose unsupported level xhigh, got %v", id, model.Thinking.Levels)
+				}
+			}
+		})
+	}
+}
+
 func TestAntigravityWebSearchModelForRequiresRequestedModelCapability(t *testing.T) {
 	registryRef := GetGlobalRegistry()
 	registryRef.RegisterClient("test-antigravity-websearch-route", "antigravity", []*ModelInfo{

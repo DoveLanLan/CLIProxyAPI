@@ -2239,13 +2239,12 @@
       "max_completion_tokens": 384000,
       "thinking": {
         "levels": [
+          "minimal",
           "low",
           "medium",
           "high",
-          "xhigh",
           "max"
-        ],
-        "zero_allowed": true
+        ]
       }
     },
     {
@@ -2261,13 +2260,12 @@
       "max_completion_tokens": 384000,
       "thinking": {
         "levels": [
+          "minimal",
           "low",
           "medium",
           "high",
-          "xhigh",
           "max"
-        ],
-        "zero_allowed": true
+        ]
       }
     }
   ]

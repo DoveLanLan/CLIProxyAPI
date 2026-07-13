@@ -82,8 +82,49 @@ func GetAntigravityModels() []*ModelInfo {
 }
 
 // GetDeepSeekModels returns the standard DeepSeek model definitions.
+//
+// DeepSeek's reasoning_effort API accepts a fixed set of levels
+// (minimal/low/medium/high/max); it does NOT accept "xhigh" and there is no
+// "none" level. The remote models catalog has historically shipped the wrong
+// levels (including xhigh), so we inject the correct, authoritative thinking
+// configuration here. This override is applied regardless of remote model
+// updates (see StartModelsUpdater) so the proxy never emits an unsupported
+// reasoning_effort to DeepSeek.
 func GetDeepSeekModels() []*ModelInfo {
-	return cloneModelInfos(getModels().DeepSeek)
+	return WithDeepSeekBuiltins(cloneModelInfos(getModels().DeepSeek))
+}
+
+// deepseekThinkingLevels is the authoritative reasoning_effort level set for
+// DeepSeek models, matching the values accepted by the upstream API.
+var deepseekThinkingLevels = []string{"minimal", "low", "medium", "high", "max"}
+
+// WithDeepSeekBuiltins overrides thinking configuration for DeepSeek models so
+// the levels match the upstream API. Unlike remote model updates, these
+// overrides always win, preventing unsupported reasoning_effort values
+// (e.g. xhigh) from being sent upstream.
+func WithDeepSeekBuiltins(models []*ModelInfo) []*ModelInfo {
+	override := map[string]*ThinkingSupport{
+		"deepseek-v4-flash": {Levels: deepseekThinkingLevels, ZeroAllowed: false},
+		"deepseek-v4-pro":   {Levels: deepseekThinkingLevels, ZeroAllowed: false},
+	}
+	if len(override) == 0 {
+		return models
+	}
+	out := make([]*ModelInfo, 0, len(models))
+	for _, model := range models {
+		if model == nil {
+			continue
+		}
+		thinking, ok := override[model.ID]
+		if !ok {
+			out = append(out, model)
+			continue
+		}
+		patched := cloneModelInfo(model)
+		patched.Thinking = thinking
+		out = append(out, patched)
+	}
+	return out
 }
 
 // AntigravityWebSearchModelFor returns the Antigravity model that should run a
