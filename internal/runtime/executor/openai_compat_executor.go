@@ -128,6 +128,14 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		}
 		translated = sanitizeOpenAIResponsesReasoningEncryptedContent(ctx, "openai compat executor", translated)
 	}
+	if to == sdktranslator.FromString("openai") && requiresOpenAIReasoningEcho(baseModel) {
+		// DeepSeek rejects tool-followup turns in thinking mode when prior
+		// assistant reasoning_content is not echoed back.
+		translated, err = helps.NormalizeOpenAIToolMessageLinks(translated, "openai compat executor")
+		if err != nil {
+			return resp, err
+		}
+	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
 	url := strings.TrimSuffix(baseURL, "/") + endpoint
@@ -327,6 +335,14 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	// Request usage data in the final streaming chunk so that token statistics
 	// are captured even when the upstream is an OpenAI-compatible provider.
 	translated, _ = sjson.SetBytes(translated, "stream_options.include_usage", true)
+	if requiresOpenAIReasoningEcho(baseModel) {
+		// DeepSeek rejects tool-followup turns in thinking mode when prior
+		// assistant reasoning_content is not echoed back.
+		translated, err = helps.NormalizeOpenAIToolMessageLinks(translated, "openai compat executor")
+		if err != nil {
+			return nil, err
+		}
+	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
@@ -771,6 +787,14 @@ func (e *OpenAICompatExecutor) resolveCompatConfig(auth *cliproxyauth.Auth) *con
 		}
 	}
 	return nil
+}
+
+func requiresOpenAIReasoningEcho(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if separator := strings.LastIndex(model, "/"); separator >= 0 {
+		model = model[separator+1:]
+	}
+	return strings.HasPrefix(model, "deepseek-")
 }
 
 func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byte {
