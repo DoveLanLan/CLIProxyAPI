@@ -27,6 +27,8 @@ Recommended root on the VPS:
   data/auths/
   data/logs/
   data/logs/split-proxy/
+  data/plugins/
+  data/grok-inspection/
   split-proxy/start.sh
   scripts/remote-deploy.sh
 ```
@@ -49,9 +51,29 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` only when split-proxy is enabled
 3. Create `data/config.yaml` on the VPS.
 4. Create `data/auths/` and place any existing auth files there if needed.
-5. Ensure `data/logs/` exists and is writable.
+5. Ensure `data/logs/`, `data/plugins/`, and `data/grok-inspection/` exist and are writable.
    When split-proxy is enabled, `data/logs/split-proxy/` will be used for Squid logs.
 6. Ensure the shared gateway stack exists and mounts the certificate directory expected by `api.heweili.top.conf`.
+
+## Dynamic Plugins
+
+The production image is built with CGO on Debian Bookworm so it can load the Linux dynamic-library plugins published by the official CLIProxyAPI plugin store. Plugin binaries and Grok inspection results are persisted on the VPS and survive container replacement:
+
+- `data/plugins/` is mounted at `/CLIProxyAPI/plugins`.
+- `data/grok-inspection/` is mounted at `/var/lib/cliproxyapi/grok-inspection` and selected through `GROK_INSPECTION_DATA_DIR`.
+
+Enable the plugin host in `data/config.yaml` before installing a plugin:
+
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"
+  configs: {}
+```
+
+After deployment, open the management panel over Tailscale, go to the official plugin store, and install **Grok Inspection**. The store downloads the platform-specific release, verifies its published checksum, saves it under `data/plugins/`, and enables its configuration. Restart the `cli-proxy-api` container once after the initial installation to verify that the plugin survives container replacement.
+
+Grok Inspection runs as trusted in-process code and can disable or delete auth credentials after operator confirmation. Back up `data/auths/` and `data/config.yaml` before the first installation, and run inspection without applying suggested actions until the results have been reviewed.
 
 ## Split Proxy Option
 

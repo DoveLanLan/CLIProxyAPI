@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+      GROK_INSPECTION_DATA_DIR: /var/lib/cliproxyapi/grok-inspection
     ports:
       - "${TAILSCALE_BIND_IP:?set TAILSCALE_BIND_IP}:${TAILSCALE_MANAGEMENT_PORT:-18317}:8317"
     expose:
@@ -13,6 +14,8 @@ services:
       - ./data/config.yaml:/CLIProxyAPI/config.yaml
       - ./data/auths:/root/.cli-proxy-api
       - ./data/logs:/CLIProxyAPI/logs
+      - ./data/plugins:/CLIProxyAPI/plugins
+      - ./data/grok-inspection:/var/lib/cliproxyapi/grok-inspection
     networks:
       - proxy
 

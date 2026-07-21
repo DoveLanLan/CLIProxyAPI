@@ -6,7 +6,11 @@ COMPOSE_FILE="$ROOT_DIR/compose.production.yml"
 COMPOSE_ARGS=(-f "$COMPOSE_FILE")
 NGINX_SOURCE="$ROOT_DIR/nginx/conf.d/api.heweili.top.conf"
 
-mkdir -p "$ROOT_DIR/data/auths" "$ROOT_DIR/data/logs"
+mkdir -p \
+  "$ROOT_DIR/data/auths" \
+  "$ROOT_DIR/data/logs" \
+  "$ROOT_DIR/data/plugins" \
+  "$ROOT_DIR/data/grok-inspection"
 
 if [[ ! -f "$ROOT_DIR/.env" && -f "$ROOT_DIR/.env.example" ]]; then
   cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
