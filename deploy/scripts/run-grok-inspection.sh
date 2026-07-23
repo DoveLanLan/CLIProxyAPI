@@ -4,7 +4,7 @@
 # Safe apply (default ON):
 #   Only force_action=disable for permanent authentication failures.
 #   Rolling quota exhaustion and transient probe errors remain recoverable.
-#   Never delete. Never enable.
+#   Never delete. Enable freshly healthy disabled accounts only when explicitly requested.
 #   Skips accounts already disabled so re-runs stay cheap on small VPS.
 #
 # Env:
@@ -17,6 +17,7 @@
 #   GROK_INSPECT_MAX_WAIT_SEC      default 1800
 #   GROK_INSPECT_POLL_SEC          default 10
 #   GROK_INSPECT_SAFE_APPLY        1|0  default 1
+#   GROK_INSPECT_SAFE_RECOVER      1|0  default 0
 #   GROK_INSPECT_DISABLE_CLASSES   comma list of permanent failure classes
 #   GROK_INSPECT_RESULTS_JSON      optional local results path for cheap filter
 set -euo pipefail
@@ -30,6 +31,7 @@ ONLY_DISABLED="${GROK_INSPECT_ONLY_DISABLED:-0}"
 MAX_WAIT="${GROK_INSPECT_MAX_WAIT_SEC:-1800}"
 POLL="${GROK_INSPECT_POLL_SEC:-10}"
 SAFE_APPLY="${GROK_INSPECT_SAFE_APPLY:-1}"
+SAFE_RECOVER="${GROK_INSPECT_SAFE_RECOVER:-0}"
 DISABLE_CLASSES="${GROK_INSPECT_DISABLE_CLASSES:-invalid_grant,reauth,deactivated,banned,permission_denied}"
 RESULTS_JSON="${GROK_INSPECT_RESULTS_JSON:-/opt/cliproxyapi/data/grok-inspection/results.json}"
 LOG_TAG="[grok-inspection-cron]"
@@ -162,11 +164,12 @@ fi
 # Prefer local results.json (cheap); fall back to status?include_results=1.
 APPLY_BODY=$(
   DISABLE_CLASSES="$DISABLE_CLASSES" RESULTS_JSON="$RESULTS_JSON" BASE="$BASE" \
-    CPA_MANAGEMENT_KEY="$CPA_MANAGEMENT_KEY" python3 - <<'PY'
+    SAFE_RECOVER="$SAFE_RECOVER" CPA_MANAGEMENT_KEY="$CPA_MANAGEMENT_KEY" python3 - <<'PY'
 import json, os, urllib.request
 
 classes = {x.strip().lower() for x in os.environ.get("DISABLE_CLASSES", "").split(",") if x.strip()}
 classes -= {"healthy", "delete", "enable", "quota_exhausted", "probe_error"}
+safe_recover = os.environ.get("SAFE_RECOVER", "0").strip().lower() in {"1", "true"}
 path = os.environ.get("RESULTS_JSON", "")
 rows = []
 
@@ -204,62 +207,91 @@ if not rows:
     except Exception:
         rows = []
 
-indexes = []
+disable_indexes = []
+recover_indexes = []
 for row in rows:
-    if not isinstance(row, dict) or row.get("disabled") is True:
+    if not isinstance(row, dict):
         continue
     classification = str(row.get("classification") or row.get("class") or "").strip().lower()
-    if classification not in classes:
-        continue
     index = row.get("auth_index") or row.get("file_name") or row.get("name") or ""
     index = str(index).strip()
-    if index:
-        indexes.append(index)
-
-seen = set()
-unique_indexes = []
-for index in indexes:
-    if index in seen:
+    if not index:
         continue
-    seen.add(index)
-    unique_indexes.append(index)
+    if row.get("disabled") is True:
+        if safe_recover and classification == "healthy":
+            recover_indexes.append(index)
+        continue
+    if classification in classes:
+        disable_indexes.append(index)
 
-print(json.dumps({"count": len(unique_indexes), "body": {"force_action": "disable", "auth_indexes": unique_indexes}, "classes": sorted(classes)}))
+def unique(items):
+    seen = set()
+    output = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        output.append(item)
+    return output
+
+disable_indexes = unique(disable_indexes)
+recover_indexes = unique(recover_indexes)
+print(json.dumps({
+    "disable_count": len(disable_indexes),
+    "disable_body": {"force_action": "disable", "auth_indexes": disable_indexes},
+    "recover_count": len(recover_indexes),
+    "recover_body": {"force_action": "enable", "auth_indexes": recover_indexes},
+    "classes": sorted(classes),
+}))
 PY
 )
 
-COUNT=$(printf '%s' "$APPLY_BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("count",0))')
+DISABLE_COUNT=$(printf '%s' "$APPLY_BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("disable_count",0))')
+RECOVER_COUNT=$(printf '%s' "$APPLY_BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("recover_count",0))')
 CLASSES_USED=$(printf '%s' "$APPLY_BODY" | python3 -c 'import sys,json; print(",".join(json.load(sys.stdin).get("classes",[])))')
-if [[ "${COUNT:-0}" -eq 0 ]]; then
-  log "safe apply skip: 0 accounts need disable (classes=$CLASSES_USED)"
+if [[ "${DISABLE_COUNT:-0}" -eq 0 && "${RECOVER_COUNT:-0}" -eq 0 ]]; then
+  log "safe apply skip: disable=0 recover=0 (classes=$CLASSES_USED)"
   exit 0
 fi
 
-BODY_JSON=$(printf '%s' "$APPLY_BODY" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["body"]))')
-log "safe apply: force_action=disable targets=$COUNT classes=$CLASSES_USED"
-apply_resp="$(api_post "/v0/management/plugins/grok-inspection/apply" "$BODY_JSON" 2>/dev/null || true)"
-if [[ -n "$apply_resp" ]]; then
-  log "apply response: $(printf '%s' "$apply_resp" | python3 -c 'import sys; print(sys.stdin.read()[:400])' 2>/dev/null || true)"
-else
-  log "apply posted (empty body)"
-fi
+apply_and_wait() {
+  local action="$1"
+  local count="$2"
+  local body_key="$3"
+  local body_json apply_resp deadline st applying adone atotal
 
-deadline=$(($(date +%s) + MAX_WAIT))
-while (($(date +%s) < deadline)); do
-  if ! st=$(status_json 2>/dev/null); then
+  if [[ "${count:-0}" -eq 0 ]]; then
+    return 0
+  fi
+  body_json=$(printf '%s' "$APPLY_BODY" | BODY_KEY="$body_key" python3 -c 'import os,sys,json; print(json.dumps(json.load(sys.stdin)[os.environ["BODY_KEY"]]))')
+  log "safe apply: force_action=$action targets=$count classes=$CLASSES_USED"
+  apply_resp="$(api_post "/v0/management/plugins/grok-inspection/apply" "$body_json" 2>/dev/null || true)"
+  if [[ -n "$apply_resp" ]]; then
+    log "apply response: $(printf '%s' "$apply_resp" | python3 -c 'import sys; print(sys.stdin.read()[:400])' 2>/dev/null || true)"
+  else
+    log "apply posted (empty body)"
+  fi
+
+  deadline=$(($(date +%s) + MAX_WAIT))
+  while (($(date +%s) < deadline)); do
+    if ! st=$(status_json 2>/dev/null); then
+      sleep "$POLL"
+      continue
+    fi
+    applying=$(printf '%s' "$st" | grep -oE '"applying"[[:space:]]*:[[:space:]]*(true|false)' | head -1 | grep -oE 'true|false' || true)
+    adone=$(printf '%s' "$st" | grep -oE '"apply_done"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
+    atotal=$(printf '%s' "$st" | grep -oE '"apply_total"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
+    log "apply status action=$action applying=${applying:-?} ${adone:-?}/${atotal:-?}"
+    if [[ "${applying:-}" != "true" ]]; then
+      log "apply finished action=$action"
+      return 0
+    fi
     sleep "$POLL"
-    continue
-  fi
-  applying=$(printf '%s' "$st" | grep -oE '"applying"[[:space:]]*:[[:space:]]*(true|false)' | head -1 | grep -oE 'true|false' || true)
-  adone=$(printf '%s' "$st" | grep -oE '"apply_done"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
-  atotal=$(printf '%s' "$st" | grep -oE '"apply_total"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
-  log "apply status applying=${applying:-?} ${adone:-?}/${atotal:-?}"
-  if [[ "${applying:-}" != "true" ]]; then
-    log "apply finished"
-    exit 0
-  fi
-  sleep "$POLL"
-done
+  done
 
-log "ERROR: timed out waiting for apply"
-exit 5
+  log "ERROR: timed out waiting for apply action=$action"
+  return 5
+}
+
+apply_and_wait disable "$DISABLE_COUNT" disable_body
+apply_and_wait enable "$RECOVER_COUNT" recover_body
