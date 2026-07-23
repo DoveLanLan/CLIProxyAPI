@@ -5,11 +5,10 @@
   "priority": "P1",
   "description": "Convert xAI HTTP SSE free-usage exhaustion into retryable auth failures, persist cooldowns, and safely recover or remove inspected Grok credentials.",
   "depends_on": [],
-  "status": "in_progress",
-  "current_phase": 1,
-  "next_action": [
-    "Implement and test xAI HTTP SSE free-usage error detection"
-  ],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
   "requires_change_workflow": true,
-  "change_workflow_status": "ready"
+  "change_workflow_status": "closed",
+  "completed_at": "2026-07-23T15:09:28+08:00"
 }

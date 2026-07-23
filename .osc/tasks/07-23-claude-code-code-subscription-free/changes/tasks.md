@@ -27,22 +27,22 @@
   - Change: Apply `gofmt` and fix all focused failures.
   - Verify: `go test` for executor/auth packages.
 
-- [ ] 4) Deploy code and update production runtime policy
+- [x] 4) Deploy code and update production runtime policy
   - Target: production image and `/opt/cliproxyapi/data/config.yaml`
   - Change: Deploy the verified build, enable cooldown persistence, and switch routing to round-robin with a backup and controlled restart/reload.
   - Verify: image revision, config values, container health, management API smoke test.
 
-- [ ] 5) Make quota inspection recoverable
+- [x] 5) Make quota inspection recoverable
   - Target: `/opt/cliproxyapi/scripts/run-grok-inspection.sh` and related timer behavior
   - Change: Remove rolling quota and transient probe failures from permanent-disable policy; retain low concurrency.
   - Verify: script configuration and a successful inspection run.
 
-- [ ] 6) Reinspect and remediate disabled xAI credentials
+- [x] 6) Reinspect and remediate disabled xAI credentials
   - Target: Grok inspection results and management auth APIs on `bytevirt`
   - Change: Scan disabled accounts, re-enable freshly healthy credentials, quarantine quota/ambiguous results, back up and delete only hard-dead credentials.
   - Verify: aggregate before/after counts, backup manifest/checksum, no secrets in output.
 
-- [ ] 7) Complete repository and production quality gates
+- [x] 7) Complete repository and production quality gates
   - Target: Go packages, `cmd/server`, `.osc/quality-gate.md`, change closure docs
   - Change: Run required tests/build, check protected paths/security/rollback, and perform production regression monitoring.
   - Verify: all commands and results recorded; rollback artifacts present.
@@ -54,4 +54,8 @@
 - The production inspection script is now tracked at `deploy/scripts/run-grok-inspection.sh`; its permanent class list excludes rolling quota and transient probe errors.
 - Disabled-only production inspection completed at 2026-07-23T12:12:22+08:00: 1346 healthy/enable, 55 quota/keep, 92 probe-error/keep, 1023 permission-denied/keep, and 479 reauth/delete.
 - The 479 hard-dead reauth files were backed up under a mode-0700 directory with mode-0600 artifacts and SHA-256 checksums, then deleted through the plugin apply API. Post-delete verification found zero target files remaining and 479 files in the backup archive.
-- Healthy credentials remain disabled until the verified image, round-robin routing, and persisted cooldowns are active in production.
+- GitHub Actions deployed image revision `0672a88e4412aa2d3cc2c8697cdc963f0acc7a72`; the container remained running while the management API reported `disable-cooling: false`, `save-cooldown-status: true`, and `routing.strategy: round-robin`.
+- The 1346 freshly healthy credentials were re-enabled after deployment. A follow-up inspection found two newly reauth credentials; both were backed up and deleted. Final verification found 1344/1344 remaining recovery targets enabled and none disabled.
+- Permanent deletion backups contain 479 initial reauth files plus 2 follow-up reauth files (481 total), with restricted permissions and verified SHA-256 manifests. All 481 deleted source files were absent after apply.
+- Final observed xAI aggregate was 3232 total, 1876 active, and 1356 disabled. The aggregate changed during remediation because credentials continued to be added independently.
+- No `/v1/messages` traffic occurred in the final ten-minute observation window, so production `.cds` creation and client-visible retry reduction remain traffic-dependent observations rather than synthetic production tests.

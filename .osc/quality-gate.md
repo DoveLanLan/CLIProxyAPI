@@ -163,3 +163,57 @@
 - [x] Stale legacy production reference scan
 - [x] `.github/workflows/update-cpa-manager-image.yml` absent
 - [x] `go build -o test-output ./cmd/server && rm test-output`
+
+---
+
+# Quality Gate Addendum: xAI streamed free-usage failover and Grok pool repair
+
+- Date: 2026-07-23
+- Scope: Detect xAI quota errors embedded in HTTP 200 SSE, trigger credential cooldown/failover, harden the Grok inspection policy, and remediate production credentials.
+
+## Executed repository gates
+
+1. Formatting
+   - Command: `gofmt` on changed Go files.
+   - Result: Passed.
+2. Focused executor and auth-manager tests
+   - Scope: xAI stream error parsing, normal stream behavior, 24-hour free-usage retry hint, and cross-credential stream failover.
+   - Result: Passed.
+3. Affected package tests
+   - Scope: `internal/runtime/executor` and `sdk/cliproxy/auth`.
+   - Result: Passed.
+4. Full tests
+   - Command: `go test ./...`
+   - Result: Passed.
+5. Required server build
+   - Command: `go build -o /tmp/cliproxyapi-test-output-0723 ./cmd/server`
+   - Result: Passed.
+6. Deployment script syntax
+   - Command: `bash -n deploy/scripts/run-grok-inspection.sh`
+   - Result: Passed.
+7. Protected translator path check
+   - Result: Passed; no `internal/translator/**` files changed.
+
+## Executed production gates
+
+1. Deployment revision and process state
+   - Result: Passed; container revision `0672a88e4412aa2d3cc2c8697cdc963f0acc7a72` is running.
+2. Runtime configuration
+   - Result: Passed; management API reports persisted cooldowns enabled and round-robin routing.
+3. Inspection policy and timer
+   - Result: Passed; deployed script matches the tracked checksum, excludes rolling quota/probe errors from permanent disable, and the timer is active.
+4. Credential recovery
+   - Result: Passed; 1344 remaining fresh-healthy targets are present and enabled, with none left disabled.
+5. Hard-dead deletion
+   - Result: Passed; 481 fresh reauth credentials were backed up and deleted, both checksum manifests pass, and all target source files are absent.
+6. Secret handling
+   - Result: Passed; the management key was read only on the production host and never printed; credential contents and account target lists were not emitted.
+
+## Residual risk
+
+- No `/v1/messages` traffic occurred in the final ten-minute observation window, so no production `.cds` file was naturally created and client-visible retry reduction was not measured.
+- The behavior is covered by focused executor/auth-manager tests; production confirmation should be collected on the next organic quota event without reading or exposing a client key.
+
+## Rollback
+
+- Code/image, config backup, and credential archive procedures are recorded in `.osc/tasks/07-23-claude-code-code-subscription-free/changes/rollback-notes.md`.
