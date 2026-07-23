@@ -832,6 +832,83 @@ func TestManagerExecuteStream_AntigravityInvalidGrantFallsBackAndSuspendsAuth(t 
 	}
 }
 
+func TestManagerExecuteStream_RetryAfter429FallsBackAndCoolsAuth(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	m.SetRetryConfig(0, 0, 4)
+
+	const cooldown = 24 * time.Hour
+	executor := &authFallbackExecutor{
+		id: "xai",
+		streamFirstErrors: map[string]error{
+			"aa-exhausted-xai": &retryAfterStatusError{
+				status:     http.StatusTooManyRequests,
+				message:    "subscription:free-usage-exhausted",
+				retryAfter: cooldown,
+			},
+		},
+	}
+	m.RegisterExecutor(executor)
+
+	model := "grok-4.5-build-free"
+	badAuth := &Auth{ID: "aa-exhausted-xai", Provider: "xai"}
+	goodAuth := &Auth{ID: "bb-healthy-xai", Provider: "xai"}
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(badAuth.ID, "xai", []*registry.ModelInfo{{ID: model}})
+	reg.RegisterClient(goodAuth.ID, "xai", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(badAuth.ID)
+		reg.UnregisterClient(goodAuth.ID)
+	})
+
+	if _, errRegister := m.Register(context.Background(), badAuth); errRegister != nil {
+		t.Fatalf("register bad auth: %v", errRegister)
+	}
+	if _, errRegister := m.Register(context.Background(), goodAuth); errRegister != nil {
+		t.Fatalf("register good auth: %v", errRegister)
+	}
+
+	startedAt := time.Now()
+	streamResult, errExecute := m.ExecuteStream(context.Background(), []string{"xai"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute != nil {
+		t.Fatalf("execute stream error = %v, want success", errExecute)
+	}
+	var payload []byte
+	for chunk := range streamResult.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("stream chunk error = %v, want success", chunk.Err)
+		}
+		payload = append(payload, chunk.Payload...)
+	}
+	if string(payload) != goodAuth.ID {
+		t.Fatalf("stream payload = %q, want %q", string(payload), goodAuth.ID)
+	}
+
+	wantCalls := []string{badAuth.ID, goodAuth.ID}
+	gotCalls := executor.StreamCalls()
+	if len(gotCalls) != len(wantCalls) {
+		t.Fatalf("stream calls = %v, want %v", gotCalls, wantCalls)
+	}
+	for i := range wantCalls {
+		if gotCalls[i] != wantCalls[i] {
+			t.Fatalf("stream call %d auth = %q, want %q", i, gotCalls[i], wantCalls[i])
+		}
+	}
+
+	updatedBad, ok := m.GetByID(badAuth.ID)
+	if !ok || updatedBad == nil {
+		t.Fatal("expected exhausted auth to remain registered")
+	}
+	state := updatedBad.ModelStates[model]
+	if state == nil || !state.Unavailable || !state.Quota.Exceeded {
+		t.Fatalf("exhausted auth state = %#v, want unavailable quota cooldown", state)
+	}
+	remaining := state.NextRetryAfter.Sub(startedAt)
+	if remaining < cooldown-time.Minute || remaining > cooldown+time.Minute {
+		t.Fatalf("cooldown remaining = %v, want about 24h", remaining)
+	}
+}
+
 func TestManagerExecuteStream_ModelSupportBadRequestFallsBackAndSuspendsAuth(t *testing.T) {
 	m := NewManager(nil, nil, nil)
 	executor := &authFallbackExecutor{

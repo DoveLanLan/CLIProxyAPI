@@ -35,3 +35,26 @@ func TestXAIStatusErr_Non429Unchanged(t *testing.T) {
 		t.Fatalf("expected nil RetryAfter for 400, got %v", *err.RetryAfter())
 	}
 }
+
+func TestXAIStreamEventError_FreeUsageExhausted(t *testing.T) {
+	payload := []byte(`{"code":"subscription:free-usage-exhausted","error":"You've used all the included free usage for now."}`)
+	err, ok := xaiStreamEventError(payload)
+	if !ok || err == nil {
+		t.Fatal("xaiStreamEventError() did not classify free-usage exhaustion")
+	}
+	statusErr, okStatus := err.(interface{ StatusCode() int })
+	if !okStatus || statusErr.StatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("status = %v, want 429", statusErr)
+	}
+	retryErr, okRetry := err.(interface{ RetryAfter() *time.Duration })
+	if !okRetry || retryErr.RetryAfter() == nil || *retryErr.RetryAfter() != 24*time.Hour {
+		t.Fatalf("RetryAfter = %#v, want 24h", retryErr)
+	}
+}
+
+func TestXAIStreamEventError_NormalResponse(t *testing.T) {
+	payload := []byte(`{"type":"response.completed","response":{"status":"completed","error":null}}`)
+	if err, ok := xaiStreamEventError(payload); ok || err != nil {
+		t.Fatalf("xaiStreamEventError() = (%v, %v), want no error", err, ok)
+	}
+}

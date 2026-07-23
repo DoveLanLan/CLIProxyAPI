@@ -456,6 +456,54 @@ func TestXAIExecutorExecuteStreamFiltersInternalXSearchCalls(t *testing.T) {
 	}
 }
 
+func TestXAIExecutorExecuteStreamSurfacesFreeUsageExhaustion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"code\":\"subscription:free-usage-exhausted\",\"error\":\"You've used all the included free usage for model grok-4.5-build-free for now.\"}\n\n"))
+	}))
+	defer server.Close()
+
+	exec := NewXAIExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{
+		ID:         "xai-free-exhausted",
+		Provider:   "xai",
+		Attributes: map[string]string{"base_url": server.URL},
+		Metadata:   map[string]any{"access_token": "xai-token"},
+	}
+	result, err := exec.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "grok-4.5-build-free",
+		Payload: []byte(`{"model":"grok-4.5-build-free","input":"hello"}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FormatOpenAIResponse,
+		Stream:       true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteStream() error = %v", err)
+	}
+
+	chunks := make([]cliproxyexecutor.StreamChunk, 0, 1)
+	for chunk := range result.Chunks {
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("stream chunks = %d, want 1", len(chunks))
+	}
+	if len(chunks[0].Payload) != 0 {
+		t.Fatalf("stream payload = %q, want empty", string(chunks[0].Payload))
+	}
+	if chunks[0].Err == nil {
+		t.Fatal("stream error = nil, want free-usage exhaustion")
+	}
+	statusErr, okStatus := chunks[0].Err.(interface{ StatusCode() int })
+	if !okStatus || statusErr.StatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("stream status = %v, want 429", statusErr)
+	}
+	retryErr, okRetry := chunks[0].Err.(interface{ RetryAfter() *time.Duration })
+	if !okRetry || retryErr.RetryAfter() == nil || *retryErr.RetryAfter() != 24*time.Hour {
+		t.Fatalf("stream RetryAfter = %#v, want 24h", retryErr)
+	}
+}
+
 func TestXAIExecutorExecuteFiltersInternalXSearchCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

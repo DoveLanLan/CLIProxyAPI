@@ -1,0 +1,15 @@
+{
+  "name": "Handle xAI streamed free-usage exhaustion and repair Grok account pool",
+  "type": "bugfix",
+  "branch": "task/claude-code-code-subscription-free",
+  "priority": "P1",
+  "description": "Convert xAI HTTP SSE free-usage exhaustion into retryable auth failures, persist cooldowns, and safely recover or remove inspected Grok credentials.",
+  "depends_on": [],
+  "status": "in_progress",
+  "current_phase": 1,
+  "next_action": [
+    "Implement and test xAI HTTP SSE free-usage error detection"
+  ],
+  "requires_change_workflow": true,
+  "change_workflow_status": "ready"
+}

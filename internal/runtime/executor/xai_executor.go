@@ -701,6 +701,15 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 				eventDataList := xaiNormalizeReasoningSummaryDataEvents(bytes.TrimSpace(line[len(xaiDataTag):]))
 				hasPendingEventLine := pendingEventLine != nil
 				for i, eventData := range eventDataList {
+					if streamErr, ok := xaiStreamEventError(eventData); ok {
+						helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
+						reporter.PublishFailure(ctx, streamErr)
+						select {
+						case out <- cliproxyexecutor.StreamChunk{Err: streamErr}:
+						case <-ctx.Done():
+						}
+						return
+					}
 					eventData = restoreXAINamespaceToolCalls(eventData, prepared.namespaceTools)
 					eventData = responseFilter.apply(eventData)
 					if len(eventData) == 0 {
@@ -2797,4 +2806,38 @@ func xaiStatusErr(code int, body []byte) statusErr {
 		err.retryAfter = &d
 	}
 	return err
+}
+
+// xaiStreamEventError converts explicit xAI error objects embedded in an HTTP
+// 200 SSE response into executor errors before protocol translation. In
+// particular, free-tier exhaustion must enter the same 24-hour auth cooldown
+// path as an initial HTTP 429 response so the conductor can rotate credentials.
+func xaiStreamEventError(eventData []byte) (error, bool) {
+	if len(eventData) == 0 {
+		return nil, false
+	}
+
+	freeUsageErr := xaiStatusErr(http.StatusTooManyRequests, eventData)
+	if freeUsageErr.retryAfter != nil {
+		return freeUsageErr, true
+	}
+
+	eventType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(eventData, "type").String()))
+	errorNode := gjson.GetBytes(eventData, "error")
+	hasErrorNode := errorNode.Exists() && errorNode.Type != gjson.Null
+	if eventType != "error" && !hasErrorNode {
+		return nil, false
+	}
+
+	status := int(gjson.GetBytes(eventData, "status").Int())
+	if status <= 0 {
+		status = int(gjson.GetBytes(eventData, "status_code").Int())
+	}
+	if status <= 0 {
+		status = xaiBareWebsocketErrorStatus(eventData)
+	}
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	return xaiStatusErr(status, eventData), true
 }
