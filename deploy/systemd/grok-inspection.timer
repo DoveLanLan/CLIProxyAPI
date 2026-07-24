@@ -1,0 +1,13 @@
+[Unit]
+Description=Run CLIProxyAPI Grok inspection every five minutes
+After=docker.service
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=grok-inspection.service
+
+[Install]
+WantedBy=timers.target

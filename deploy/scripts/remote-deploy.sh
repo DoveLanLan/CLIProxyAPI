@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/compose.production.yml"
 COMPOSE_ARGS=(-f "$COMPOSE_FILE")
 NGINX_SOURCE="$ROOT_DIR/nginx/conf.d/api.heweili.top.conf"
+GROK_INSPECTION_SERVICE_SOURCE="$ROOT_DIR/systemd/grok-inspection.service"
+GROK_INSPECTION_TIMER_SOURCE="$ROOT_DIR/systemd/grok-inspection.timer"
 
 mkdir -p \
   "$ROOT_DIR/data/auths" \
@@ -55,6 +57,15 @@ cd "$ROOT_DIR"
 docker compose "${COMPOSE_ARGS[@]}" pull
 docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans
 docker compose "${COMPOSE_ARGS[@]}" ps
+
+if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+  install -m 644 "$GROK_INSPECTION_SERVICE_SOURCE" /etc/systemd/system/grok-inspection.service
+  install -m 644 "$GROK_INSPECTION_TIMER_SOURCE" /etc/systemd/system/grok-inspection.timer
+  systemctl daemon-reload
+  systemctl enable --now grok-inspection.timer
+else
+  echo "warning: systemctl unavailable; Grok inspection timer was not installed" >&2
+fi
 
 if [[ ! -d "$GATEWAY_CONF_DIR" ]]; then
   echo "error: missing gateway config directory: $GATEWAY_CONF_DIR" >&2

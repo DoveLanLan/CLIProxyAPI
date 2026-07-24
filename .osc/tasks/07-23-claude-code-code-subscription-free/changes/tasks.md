@@ -47,6 +47,11 @@
   - Change: Run required tests/build, check protected paths/security/rollback, and perform production regression monitoring.
   - Verify: all commands and results recorded; rollback artifacts present.
 
+- [x] 8) Persist the permission-denied inspection policy
+  - Target: `deploy/systemd/grok-inspection.service`, `deploy/systemd/grok-inspection.timer`, `deploy/scripts/remote-deploy.sh`, deployment docs
+  - Change: Track and install the production units with `permission_denied` in the permanent-disable list while excluding quota/probe errors.
+  - Verify: unit contents, shell syntax, compose render, server build, deployed unit environment, and timer state.
+
 ## Notes
 
 - Production evidence before changes: 3435 xAI credentials, 441 active, 2994 disabled; 1169 recent log records contained free-usage exhaustion while `/v1/messages` remained HTTP 200.
@@ -59,3 +64,5 @@
 - Permanent deletion backups contain 479 initial reauth files plus 2 follow-up reauth files (481 total), with restricted permissions and verified SHA-256 manifests. All 481 deleted source files were absent after apply.
 - Final observed xAI aggregate was 3232 total, 1876 active, and 1356 disabled. The aggregate changed during remediation because credentials continued to be added independently.
 - No `/v1/messages` traffic occurred in the final ten-minute observation window, so production `.cds` creation and client-visible retry reduction remain traffic-dependent observations rather than synthetic production tests.
+- Follow-up production evidence on 2026-07-24 found 112 freshly classified `permission_denied` credentials still enabled because the untracked service override omitted that class. After backup, `daemon-reload`, and a manual safe apply, all 112 were disabled with no deletion; the durable repository change is task 8.
+- The tracked service/timer passed Linux systemd verification and are installed by `remote-deploy.sh`; base and split-proxy compose renders, shell syntax, and the required server build passed.

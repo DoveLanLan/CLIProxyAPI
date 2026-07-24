@@ -31,3 +31,15 @@
 - [ ] Compare client-visible 429 frequency after representative `/v1/messages` traffic resumes.
 
 The unchecked observations require organic or user-authorized synthetic traffic; no client key or credential was read to manufacture a production request.
+
+## 2026-07-24 durable systemd follow-up
+
+- [x] `git diff --check` passed.
+- [x] `bash -n deploy/scripts/remote-deploy.sh deploy/scripts/run-grok-inspection.sh` passed.
+- [x] Base production compose render passed.
+- [x] Split-proxy production compose render passed.
+- [x] Tracked service and timer passed Linux `systemd-analyze verify`.
+- [x] `go build -o /tmp/cliproxyapi-test-output-0724 ./cmd/server` passed.
+- [x] Service policy includes `permission_denied` and excludes `quota_exhausted` and `probe_error`.
+- [x] Production manual safe apply disabled 112/112 permission-denied credentials with no apply failures.
+- [x] Production unit backup exists and the five-minute timer remains active.

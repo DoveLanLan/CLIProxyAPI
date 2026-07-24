@@ -217,3 +217,48 @@
 ## Rollback
 
 - Code/image, config backup, and credential archive procedures are recorded in `.osc/tasks/07-23-claude-code-code-subscription-free/changes/rollback-notes.md`.
+
+---
+
+# Quality Gate Addendum: persist Grok inspection permission-denied policy
+
+- Date: 2026-07-24
+- Scope: Track and install the production Grok inspection systemd service/timer so spending-limit credentials remain excluded from routing.
+
+## Changed scope
+
+- `deploy/systemd/grok-inspection.service`
+- `deploy/systemd/grok-inspection.timer`
+- `deploy/scripts/remote-deploy.sh`
+- `deploy/README.md`
+- OSC project/task/quality artifacts
+
+## Executed gates
+
+1. Diff and security checks
+   - Commands: `git diff --check`; exact class-list assertions; management-key value scan.
+   - Result: Passed; no secret value or unsafe quota/probe class was added.
+2. Shell syntax
+   - Command: `bash -n deploy/scripts/remote-deploy.sh deploy/scripts/run-grok-inspection.sh`
+   - Result: Passed.
+3. Compose renders
+   - Commands: base and split-proxy `docker compose ... config --services`.
+   - Result: Passed; expected services were rendered.
+4. Linux systemd validation
+   - Command: `systemd-analyze verify` against both tracked units on `bytevirt`.
+   - Result: Passed; the host emitted only an unrelated warning for its packaged snapd unit.
+5. Required server build
+   - Command: `go build -o /tmp/cliproxyapi-test-output-0724 ./cmd/server`
+   - Result: Passed.
+6. Production safe apply
+   - Result: Passed; 112/112 `permission_denied` credentials were disabled, none deleted, and no apply failures were reported.
+7. Post-apply observation
+   - Result: 23 `/v1/messages` requests returned HTTP 200 with no `personal-team-blocked:spending-limit` log entry in the observation window.
+
+## Final self-review
+
+- Security: Units contain only the management-key file path, never the key value.
+- Recovery semantics: `quota_exhausted` and `probe_error` remain outside permanent disable.
+- Compatibility: No Go/API behavior changed; non-systemd hosts receive a warning and continue deployment.
+- Performance: Three workers, CPU quota, memory limit, and the five-minute interval remain unchanged.
+- Rollback: Revert the deploy files and restore the timestamped production unit backup documented in the task rollback notes.

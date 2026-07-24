@@ -47,6 +47,15 @@ inspection policy so rolling quota is recoverable. Reinspect disabled accounts,
 create a restricted backup of hard-dead targets, delete only permanent failure
 classes, and re-enable credentials that pass a fresh health probe.
 
+### Follow-up: persist the production inspection unit
+
+The production service unit was originally installed from an untracked local
+draft. Its `GROK_INSPECT_DISABLE_CLASSES` override omitted
+`permission_denied`, leaving freshly detected spending-limit accounts enabled
+despite the tracked runner's safe default. Track the service and timer under
+`deploy/systemd/`, install them from the production deploy script, and keep the
+permanent class list aligned with the runner default.
+
 ## Risks & Mitigations
 
 - Risk: A normal response containing an `error` field could be misclassified.

@@ -25,3 +25,10 @@
 ## Operational caution
 
 Rolling back the executor restores the original Claude Code failure shape: an upstream HTTP 200 SSE quota error may reach the client instead of triggering transparent credential failover. Prefer targeted rollback only after a confirmed regression.
+
+## 2026-07-24 systemd policy rollback
+
+- Revert the commit that adds `deploy/systemd/grok-inspection.service`, `deploy/systemd/grok-inspection.timer`, and the install block in `deploy/scripts/remote-deploy.sh`.
+- On production, restore `/opt/cliproxyapi/backups/grok-remediation-20260723T121222+0800/grok-inspection.service.pre-permission-denied-20260724T012714+0000`, then run `systemctl daemon-reload`.
+- Restoring the old unit re-enables the defect: `permission_denied` credentials remain eligible for routing. Prefer disabling the timer instead of restoring that policy unless rollback is required for an unrelated unit failure.
+- The 112 credentials disabled by the follow-up were not deleted and require no data restore; they can be re-enabled through the management API if the classification policy is intentionally reversed.

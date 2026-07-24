@@ -44,6 +44,7 @@
 6. Permanent inspection classes exclude rolling quota and transient probe errors. (Verify: deployed script configuration.)
 7. Disabled credentials are freshly classified before action; only hard-dead classes are deleted, and exact deletion targets have a restricted backup. (Verify: aggregate inspection report, backup manifest/count, post-delete management aggregate.)
 8. Focused tests, formatting, full tests, and the required server build pass. (Verify: recorded quality-gate output.)
+9. Production systemd units are tracked and installed by the deploy workflow; the service disables `permission_denied` but excludes rolling quota and transient probe errors. (Verify: unit contents, shell syntax, deployed `systemctl show`, and a safe-apply run.)
 
 ## Behavior / Requirements
 
@@ -74,6 +75,7 @@ Production inspection must distinguish temporary and permanent states:
 - Backwards compatibility: Normal xAI response translation is unchanged; only explicit upstream error objects change control flow.
 - Data/migrations: No repository schema migration. Production creates cooldown `.cds` files and an operational backup/manifest.
 - Config/flags: `save-cooldown-status: true`; routing changes to `round-robin`.
+- Deployment: `deploy/systemd/grok-inspection.service` and `.timer` are the source of truth installed by `deploy/scripts/remote-deploy.sh` on the systemd-based production host.
 
 ## API/UX Decisions (if applicable)
 

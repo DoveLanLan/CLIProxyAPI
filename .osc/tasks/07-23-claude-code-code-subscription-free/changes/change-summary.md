@@ -30,3 +30,10 @@
 ## Remaining observation
 
 No `/v1/messages` traffic occurred in the final ten-minute production window. The deployed configuration is ready to persist `.cds` files, but file creation and user-visible retry improvement must be confirmed when real traffic next encounters a cooled credential.
+
+## 2026-07-24 permission-denied follow-up
+
+- Production inspection found 112 `permission_denied` credentials still enabled because the manually installed systemd unit overrode the tracked runner default without that class.
+- The production unit was backed up and corrected, `daemon-reload` succeeded, and a manual safe apply disabled 112/112 targets without deleting credentials or touching quota/probe-error classes.
+- `deploy/systemd/grok-inspection.service` and `.timer` are now tracked and installed by `deploy/scripts/remote-deploy.sh`, preventing a later deployment or manual bootstrap from restoring the stale policy.
+- Post-apply observation recorded 23 successful `/v1/messages` requests and no `personal-team-blocked:spending-limit` log entries.

@@ -31,6 +31,8 @@ Recommended root on the VPS:
   data/grok-inspection/
   split-proxy/start.sh
   scripts/remote-deploy.sh
+  systemd/grok-inspection.service
+  systemd/grok-inspection.timer
 ```
 
 The deployment workflow will create the directory tree, but it will not create live runtime secrets for you.
@@ -74,6 +76,13 @@ plugins:
 After deployment, open the management panel over Tailscale, go to the official plugin store, and install **Grok Inspection**. The store downloads the platform-specific release, verifies its published checksum, saves it under `data/plugins/`, and enables its configuration. Restart the `cli-proxy-api` container once after the initial installation to verify that the plugin survives container replacement.
 
 Grok Inspection runs as trusted in-process code and can disable or delete auth credentials after operator confirmation. Back up `data/auths/` and `data/config.yaml` before the first installation, and run inspection without applying suggested actions until the results have been reviewed.
+
+The production deploy script installs and enables the tracked five-minute
+systemd timer after the application container is running. Its safe-apply policy
+disables permanent authentication failures, including `permission_denied`, but
+keeps rolling quota exhaustion and transient probe failures recoverable. The
+timer reads the management key from `data/.management-key`; keep that file mode
+0600 and never place its value in the unit or repository.
 
 ## Split Proxy Option
 

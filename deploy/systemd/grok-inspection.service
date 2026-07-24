@@ -1,0 +1,23 @@
+[Unit]
+Description=CLIProxyAPI Grok inspection incremental probe and safe disable apply
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/cliproxyapi/data/.management-key
+
+[Service]
+Type=oneshot
+Environment=CPA_MGMT_BASE=http://100.67.99.9:18318
+Environment=CPA_MGMT_KEY_FILE=/opt/cliproxyapi/data/.management-key
+Environment=GROK_INSPECT_MODE=incremental
+Environment=GROK_INSPECT_WORKERS=3
+Environment=GROK_INSPECT_SAFE_APPLY=1
+Environment=GROK_INSPECT_POLL_SEC=10
+Environment=GROK_INSPECT_MAX_WAIT_SEC=1800
+Environment=GROK_INSPECT_DISABLE_CLASSES=invalid_grant,reauth,deactivated,banned,permission_denied
+Environment=GROK_INSPECT_RESULTS_JSON=/opt/cliproxyapi/data/grok-inspection/results.json
+ExecStart=/opt/cliproxyapi/scripts/run-grok-inspection.sh
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUQuota=60%
+MemoryMax=256M
