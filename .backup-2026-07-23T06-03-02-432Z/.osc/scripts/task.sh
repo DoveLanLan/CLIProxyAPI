@@ -14,9 +14,9 @@ Usage:
   ./.osc/scripts/task.sh select <task-dir>
   ./.osc/scripts/task.sh next
   ./.osc/scripts/task.sh clear
-  ./.osc/scripts/task.sh archive [--force] [--next|--no-next] [<task-dir>]
+  ./.osc/scripts/task.sh archive <task-dir>
   ./.osc/scripts/task.sh status [<task-dir>]
-  ./.osc/scripts/task.sh done [--archive] [<task-dir>]
+  ./.osc/scripts/task.sh done [<task-dir>]
   ./.osc/scripts/task.sh progress <message> [<task-dir>]
 EOF
 }
@@ -260,79 +260,22 @@ cmd_select() {
 }
 
 cmd_archive() {
-  require_jq
-  local root task_rel force_archive auto_next
-  root="$(osc_repo_root)"
-  task_rel=""
-  force_archive="false"
-  auto_next="auto"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --force) force_archive="true"; shift ;;
-      --next) auto_next="true"; shift ;;
-      --no-next) auto_next="false"; shift ;;
-      *)
-        [[ -z "$task_rel" ]] || { echo "error: unexpected arg: $1" >&2; exit 1; }
-        task_rel="$1"
-        shift
-        ;;
-    esac
-  done
-
-  task_rel="${task_rel:-$(osc_current_task_rel "$root")}"
-  [[ -n "$task_rel" ]] || { echo "error: no task selected" >&2; exit 1; }
-
+  local root="${1:-$(osc_repo_root)}"
+  local task_rel="$2"
   local abs="$root/$task_rel"
   [[ -d "$abs" ]] || { echo "error: not found: $task_rel" >&2; exit 1; }
-  local task_json="$abs/$FILE_TASK_JSON"
-  [[ -f "$task_json" ]] || { echo "error: task.json not found" >&2; exit 1; }
-
-  local status
-  status="$(jq -r '.status // "unknown"' "$task_json" 2>/dev/null)"
-  if [[ "$force_archive" != "true" && "$status" != "done" && "$status" != "completed" && "$status" != "archived" ]]; then
-    echo "error: refusing to archive unfinished task: $task_rel (status=$status)" >&2
-    echo "hint: mark it done first or rerun with --force" >&2
-    exit 1
-  fi
-
   local dest_dir
   dest_dir="$(osc_archive_dir "$root")"
   mkdir -p "$dest_dir"
   local base
   base="$(basename "$abs")"
-
-  local now
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  local archive_rel="${dest_dir#$root/}/$base"
-  local tmp="${task_json}.tmp"
-  jq --arg now "$now" --arg archive_rel "$archive_rel" '.archived_at = $now | .archived_to = $archive_rel' "$task_json" >"$tmp" && mv "$tmp" "$task_json"
-  echo "[$now] ARCHIVED -> $archive_rel" >>"$abs/progress.log"
-
-  local current was_current
-  current="$(osc_current_task_rel "$root")"
-  was_current="false"
-  if [[ "$current" == "$task_rel" ]]; then
-    was_current="true"
-  fi
-
   mv "$abs" "$dest_dir/$base"
-  echo "archived: $task_rel -> $archive_rel"
-
-  if [[ "$was_current" == "true" ]]; then
+  echo "archived: $task_rel -> ${dest_dir#$root/}/$base"
+  local current
+  current="$(osc_current_task_rel "$root")"
+  if [[ "$current" == "$task_rel" ]]; then
     osc_clear_current_task "$root"
-    if [[ "$auto_next" != "false" ]]; then
-      local next_task
-      next_task="$(osc_find_next_task_rel "$root")"
-      if [[ -n "$next_task" ]]; then
-        osc_set_current_task "$next_task" "$root"
-        echo "current: $next_task"
-      else
-        echo "current cleared"
-      fi
-    else
-      echo "current cleared"
-    fi
+    echo "current cleared"
   fi
 }
 
@@ -341,7 +284,34 @@ cmd_next() {
   local root
   root="$(osc_repo_root)"
   local found=""
-  found="$(osc_find_next_task_rel "$root")"
+  while IFS= read -r d; do
+    local tj="$d/$FILE_TASK_JSON"
+    [[ -f "$tj" ]] || continue
+    local status
+    status="$(jq -r '.status // "planned"' "$tj" 2>/dev/null)"
+    [[ "$status" == "done" ]] && continue
+
+    # Check dependencies: skip if any dependency is not done
+    local blocked=false
+    local deps
+    deps="$(jq -r '.depends_on // [] | .[]' "$tj" 2>/dev/null)"
+    while IFS= read -r dep; do
+      [[ -n "$dep" ]] || continue
+      local dep_json="$root/$dep/$FILE_TASK_JSON"
+      if [[ -f "$dep_json" ]]; then
+        local dep_status
+        dep_status="$(jq -r '.status // "planned"' "$dep_json" 2>/dev/null)"
+        if [[ "$dep_status" != "done" ]]; then
+          blocked=true
+          break
+        fi
+      fi
+    done <<< "$deps"
+    [[ "$blocked" == "true" ]] && continue
+
+    found="${d#$root/}"
+    break
+  done < <(osc_list_task_dirs "$root")
 
   if [[ -z "$found" ]]; then
     echo "no pending tasks (all done or blocked)"
@@ -383,23 +353,9 @@ cmd_status() {
 
 cmd_done() {
   require_jq
-  local root task_rel task_dir task_json archive_after
+  local root task_rel task_dir task_json
   root="$(osc_repo_root)"
-  task_rel=""
-  archive_after="false"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --archive) archive_after="true"; shift ;;
-      *)
-        [[ -z "$task_rel" ]] || { echo "error: unexpected arg: $1" >&2; exit 1; }
-        task_rel="$1"
-        shift
-        ;;
-    esac
-  done
-
-  task_rel="${task_rel:-$(osc_current_task_rel "$root")}"
+  task_rel="${1:-$(osc_current_task_rel "$root")}"
   [[ -n "$task_rel" ]] || { echo "error: no task selected" >&2; exit 1; }
   task_dir="$root/$task_rel"
   task_json="$task_dir/$FILE_TASK_JSON"
@@ -453,14 +409,6 @@ cmd_done() {
       echo "  or PR: git push -u origin $branch"
     fi
   fi
-
-  if [[ "$archive_after" == "true" ]]; then
-    cmd_archive --next "$task_rel"
-  else
-    echo "---"
-    echo "hint: archive this completed task with:"
-    echo "  ./.osc/scripts/task.sh archive $task_rel"
-  fi
 }
 
 cmd_progress() {
@@ -488,9 +436,9 @@ main() {
     select) shift; cmd_select "$(osc_repo_root)" "${1:-}" ;;
     next) shift; cmd_next ;;
     clear) shift; cmd_clear ;;
-    archive) shift; cmd_archive "$@" ;;
+    archive) shift; cmd_archive "$(osc_repo_root)" "${1:-}" ;;
     status) shift; cmd_status "${1:-}" ;;
-    done) shift; cmd_done "$@" ;;
+    done) shift; cmd_done "${1:-}" ;;
     progress) shift; cmd_progress "${1:-}" "${2:-}" ;;
     ""|-h|--help) usage ;;
     *) usage; exit 1 ;;
@@ -498,3 +446,4 @@ main() {
 }
 
 main "$@"
+

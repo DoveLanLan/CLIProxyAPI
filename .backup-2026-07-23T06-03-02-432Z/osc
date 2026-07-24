@@ -7,7 +7,7 @@ Usage:
   ./osc <command> [options]
 
 Commands:
-  codex   [-p "<extra prompt>"] [--auto-task|--no-auto-task] [--auto-gate] [--gate-cmd "<cmd>"] [-- <codex args...>]
+  codex   [-p "<extra prompt>"] [--auto-task|--no-auto-task] [--auto-team] [--team-template <name>] [--team-runtime <claude|codex>] [--auto-gate] [--gate-cmd "<cmd>"] [-- <codex args...>]
           Launch Codex with osc workflow context.
   gate    [--cmd "<command>"]
           Run local quality gate and write .osc/quality-gate.md.
@@ -20,6 +20,7 @@ Examples:
   ./osc codex
   ./osc codex --auto-task -p "修复登录 bug 并补测试"
   ./osc codex -p "实现一个新的登录页"
+  ./osc codex --auto-team --team-template feature-team --team-runtime codex
   ./osc codex --auto-gate --gate-cmd "npm test"
   ./osc codex -p "fix lint errors" -- --model o3 --sandbox workspace-write
   ./osc gate
@@ -64,36 +65,6 @@ parse_bool() {
   esac
 }
 
-context_mode() {
-  local mode
-  mode="$(printf '%s' "${OSC_CONTEXT_MODE:-compact}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  if [[ "$mode" == "full" ]]; then
-    echo "full"
-  else
-    echo "compact"
-  fi
-}
-
-workflow_index() {
-  local workflow_path="$1"
-  if [[ ! -f "$workflow_path" ]]; then
-    echo "No .osc/workflow.md found"
-    return 0
-  fi
-  echo "Workflow index (read full file on demand: .osc/workflow.md)"
-  echo ""
-  local found=0
-  while IFS= read -r line; do
-    if [[ "$line" == "## "* ]]; then
-      echo "$line"
-      found=1
-    fi
-  done <"$workflow_path"
-  if [[ "$found" -eq 0 ]]; then
-    echo "(No section headings found)"
-  fi
-}
-
 should_collect_startup_request() {
   local mode=""
   mode="$(parse_bool "${OSC_CODEX_PROMPT_ON_START:-}")"
@@ -135,6 +106,9 @@ collect_startup_request() {
   printf '%s' "$entered"
 }
 
+PROFILE_AUTO_TEAM=0
+PROFILE_TEAM_TEMPLATE=""
+PROFILE_TEAM_RUNTIME=""
 PROFILE_AUTO_GATE=0
 PROFILE_GATE_COMMAND="npm test"
 PROFILE_GATE_BY_TYPE_JSON="{}"
@@ -143,6 +117,9 @@ PROFILE_AUTO_TASK=1
 load_codex_profile() {
   local root="$1"
   local profile="$root/.osc/codex-profile.json"
+  PROFILE_AUTO_TEAM=0
+  PROFILE_TEAM_TEMPLATE=""
+  PROFILE_TEAM_RUNTIME=""
   PROFILE_AUTO_GATE=0
   PROFILE_GATE_COMMAND="npm test"
   PROFILE_GATE_BY_TYPE_JSON="{}"
@@ -161,8 +138,28 @@ load_codex_profile() {
   fi
 
   local raw="" parsed=""
-  if jq -e 'has("autoTeam") or has("teamTemplate") or has("teamRuntime")' "$profile" >/dev/null 2>&1; then
-    warn "autoTeam/teamTemplate/teamRuntime in $profile are deprecated and ignored; use prompt-triggered native subagents instead"
+  raw="$(jq -r 'if has("autoTeam") then .autoTeam else empty end' "$profile" 2>/dev/null || true)"
+  if [[ -n "$raw" ]]; then
+    parsed="$(parse_bool "$raw")"
+    if [[ -n "$parsed" ]]; then
+      PROFILE_AUTO_TEAM="$parsed"
+    else
+      warn "invalid autoTeam in $profile (expected boolean)"
+    fi
+  fi
+
+  raw="$(jq -r '.teamTemplate // empty' "$profile" 2>/dev/null || true)"
+  if [[ -n "$raw" && "$raw" != "null" ]]; then
+    PROFILE_TEAM_TEMPLATE="$raw"
+  fi
+
+  raw="$(jq -r '.teamRuntime // empty' "$profile" 2>/dev/null || true)"
+  if [[ -n "$raw" && "$raw" != "null" ]]; then
+    if [[ "$raw" == "claude" || "$raw" == "codex" ]]; then
+      PROFILE_TEAM_RUNTIME="$raw"
+    else
+      warn "invalid teamRuntime in $profile (use claude|codex)"
+    fi
   fi
 
   raw="$(jq -r 'if has("autoGate") then .autoGate else empty end' "$profile" 2>/dev/null || true)"
@@ -337,6 +334,118 @@ read_current_task() {
   printf '%s\n' "$task_rel"
 }
 
+find_existing_team_for_task() {
+  local root="$1"
+  local task_rel="$2"
+  local teams_dir="$root/.osc/teams"
+  [[ -d "$teams_dir" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  local team_json=""
+  for team_json in "$teams_dir"/*/team.json; do
+    [[ -f "$team_json" ]] || continue
+    local status=""
+    local task=""
+    local team_id=""
+    status="$(jq -r '.status // ""' "$team_json" 2>/dev/null || true)"
+    task="$(jq -r '.task // ""' "$team_json" 2>/dev/null || true)"
+    team_id="$(jq -r '.id // ""' "$team_json" 2>/dev/null || true)"
+    [[ "$task" == "$task_rel" ]] || continue
+    [[ "$status" == "created" || "$status" == "running" ]] || continue
+    [[ -n "$team_id" ]] || team_id="$(basename "$(dirname "$team_json")")"
+    echo "${team_id}|${status}"
+    return 0
+  done
+  return 1
+}
+
+run_team_command() {
+  local root="$1"
+  shift
+  local script="$root/.osc/scripts/team.sh"
+  [[ -f "$script" ]] || return 127
+  if [[ -x "$script" ]]; then
+    "$script" "$@"
+  else
+    bash "$script" "$@"
+  fi
+}
+
+auto_team_bootstrap() {
+  local root="$1"
+  local team_template="${2:-}"
+  local team_runtime="${3:-}"
+  local current_task=""
+  local existing=""
+  local team_id=""
+  local team_status=""
+  local action="start"
+  local summary=""
+  local create_output=""
+  local create_exit=0
+  local start_output=""
+  local start_exit=0
+  local -a create_args=()
+  local -a start_args=()
+
+  current_task="$(read_current_task "$root" || true)"
+  if [[ -z "$current_task" ]]; then
+    printf '%s' "[osc] auto-team skipped: no active task (.osc/.current-task is empty)"
+    return 0
+  fi
+
+  existing="$(find_existing_team_for_task "$root" "$current_task" || true)"
+  if [[ -n "$existing" ]]; then
+    IFS='|' read -r team_id team_status <<<"$existing"
+    if [[ "$team_status" == "running" ]]; then
+      action="resume"
+    else
+      action="start"
+    fi
+    summary="[osc] auto-team reused existing team ${team_id} (status=${team_status})"
+  else
+    create_args=(create "$current_task")
+    if [[ -n "$team_template" ]]; then
+      create_args+=(--template "$team_template")
+    else
+      create_args+=(--auto)
+    fi
+
+    if create_output="$(run_team_command "$root" "${create_args[@]}" 2>&1)"; then
+      team_id="$(printf '%s\n' "$create_output" | sed -n 's/^created team:[[:space:]]*//p' | head -n 1)"
+      if [[ -z "$team_id" ]]; then
+        team_id="$(printf '%s\n' "$create_output" | sed -n 's/.*created team:[[:space:]]*//p' | head -n 1)"
+      fi
+      summary="[osc] auto-team create: ok"
+    else
+      create_exit=$?
+      printf '[osc] auto-team create failed (exit=%s). launching codex without automation.\n' "$create_exit" >&2
+      printf '%s\n' "$create_output" >&2
+      printf '%s' "[osc] auto-team create failed: exit=${create_exit}"
+      return 0
+    fi
+  fi
+
+  if [[ -z "$team_id" ]]; then
+    printf '%s' "[osc] auto-team create succeeded but team id was not detected"
+    return 0
+  fi
+
+  start_args=("$action" "$team_id")
+  if [[ -n "$team_runtime" ]]; then
+    start_args+=(--runtime "$team_runtime")
+  fi
+
+  if start_output="$(run_team_command "$root" "${start_args[@]}" 2>&1)"; then
+    printf '%s\n%s' "$summary" "[osc] auto-team ${action}: ok (team=${team_id})"
+  else
+    start_exit=$?
+    printf '[osc] auto-team %s failed for %s (exit=%s). launching codex anyway.\n' "$action" "$team_id" "$start_exit" >&2
+    printf '%s\n' "$start_output" >&2
+    printf '%s\n%s' "$summary" "[osc] auto-team ${action} failed: exit=${start_exit} (team=${team_id})"
+  fi
+}
+
 AUTO_TASK_CREATED_REL=""
 
 detect_change_intent() {
@@ -442,20 +551,15 @@ auto_task_bootstrap() {
 build_codex_prompt() {
   local root="$1"
   local extra="${2:-}"
-  local auto_task_summary="${3:-}"
+  local auto_team_summary="${3:-}"
+  local auto_task_summary="${4:-}"
 
   local workflow_path="$root/.osc/workflow.md"
   local context_cmd="$root/.osc/scripts/get-context.sh"
-  local mode=""
-  mode="$(context_mode)"
 
   local workflow=""
   if [[ -f "$workflow_path" ]]; then
-    if [[ "$mode" == "full" ]]; then
-      workflow="$(cat "$workflow_path")"
-    else
-      workflow="$(workflow_index "$workflow_path")"
-    fi
+    workflow="$(cat "$workflow_path")"
   fi
 
   local context=""
@@ -463,6 +567,18 @@ build_codex_prompt() {
     context="$("$context_cmd" || true)"
   elif [[ -f "$context_cmd" ]]; then
     context="$(bash "$context_cmd" || true)"
+  fi
+
+  local auto_team_block=""
+  if [[ -n "$auto_team_summary" ]]; then
+    auto_team_block=$(cat <<EOF
+Auto-team preflight:
+\`\`\`
+$auto_team_summary
+\`\`\`
+
+EOF
+)
   fi
 
   local auto_task_block=""
@@ -498,7 +614,6 @@ CPEOF
 
   cat <<EOF
 You are working in this repository. Follow the open-spec-code (osc) workflow.
-Context mode: $mode
 
 Critical rule: do not only output results in chat — write the required Markdown artifacts into the repo files.
 
@@ -514,7 +629,7 @@ When the user requests code changes, bug fixes, or refactoring:
 3. Exception: if the user explicitly says to skip (e.g., "直接改", "skip workflow", "just do it").
 4. Files under .osc/ are always allowed (they are workflow artifacts, not source code).
 
-First, read these files on demand before changing code:
+First, read these files:
 - .osc/workflow.md
 - .osc/spec/*/index.md
 
@@ -523,16 +638,21 @@ Current repo context (from .osc/scripts/get-context.sh):
 $context
 \`\`\`
 
-Workflow guide/index (.osc/workflow.md):
+Workflow guide (.osc/workflow.md):
 \`\`\`
 $workflow
 \`\`\`
 
 $auto_task_block
+$auto_team_block
 $change_pending_block
-PARALLEL WORK:
-When a task should be split, prefer explicit native subagents with clear ownership and non-overlapping write scopes.
-Do not use the deprecated OSC Team automation path.
+TEAM SYSTEM:
+You have access to a multi-agent team system for complex tasks. Use it to parallelize work:
+- Create a team: ./.osc/scripts/team.sh create <task-dir> [--auto]
+- Start a team:  ./.osc/scripts/team.sh start <team-id>
+- Check status:  ./.osc/scripts/team.sh status <team-id>
+- Stop a team:   ./.osc/scripts/team.sh stop <team-id>
+When a task involves multiple roles (e.g., frontend + backend, or review + implement), consider using teams.
 
 User request:
 $extra
@@ -557,12 +677,18 @@ main() {
       local extra_prompt=""
       local auto_task=1
       local auto_task_set=0
+      local auto_team=0
+      local auto_team_set=0
+      local team_template=""
+      local team_template_set=0
+      local team_runtime=""
+      local team_runtime_set=0
       local auto_gate=0
       local auto_gate_set=0
       local gate_cmd=""
       local gate_cmd_set=0
       local auto_task_summary=""
-      local deprecated_team_flag=0
+      local auto_team_summary=""
       local -a codex_args=()
       while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -587,27 +713,32 @@ main() {
             shift
             ;;
           --auto-team)
-            deprecated_team_flag=1
+            auto_team=1
+            auto_team_set=1
             shift
             ;;
           --team-template)
             shift
             [[ $# -gt 0 ]] || die "Missing value for --team-template"
-            deprecated_team_flag=1
+            team_template="$1"
+            team_template_set=1
             shift
             ;;
           --team-template=*)
-            deprecated_team_flag=1
+            team_template="${1#--team-template=}"
+            team_template_set=1
             shift
             ;;
           --team-runtime)
             shift
             [[ $# -gt 0 ]] || die "Missing value for --team-runtime"
-            deprecated_team_flag=1
+            team_runtime="$1"
+            team_runtime_set=1
             shift
             ;;
           --team-runtime=*)
-            deprecated_team_flag=1
+            team_runtime="${1#--team-runtime=}"
+            team_runtime_set=1
             shift
             ;;
           --auto-gate)
@@ -648,6 +779,15 @@ main() {
       if (( !auto_task_set )); then
         auto_task="$PROFILE_AUTO_TASK"
       fi
+      if (( !auto_team_set )) && (( PROFILE_AUTO_TEAM )); then
+        auto_team=1
+      fi
+      if (( !team_template_set )) && [[ -n "$PROFILE_TEAM_TEMPLATE" ]]; then
+        team_template="$PROFILE_TEAM_TEMPLATE"
+      fi
+      if (( !team_runtime_set )) && [[ -n "$PROFILE_TEAM_RUNTIME" ]]; then
+        team_runtime="$PROFILE_TEAM_RUNTIME"
+      fi
       if (( !auto_gate_set )) && (( PROFILE_AUTO_GATE )); then
         auto_gate=1
       fi
@@ -657,20 +797,23 @@ main() {
 
       extra_prompt="$(collect_startup_request "$extra_prompt")"
 
-      if ((deprecated_team_flag)); then
-        warn "--auto-team/--team-template/--team-runtime are deprecated and ignored; ask for native subagents in the prompt instead"
+      if [[ -n "$team_runtime" && "$team_runtime" != "claude" && "$team_runtime" != "codex" ]]; then
+        die "Invalid --team-runtime: $team_runtime (use claude|codex)"
       fi
 
       # Mark runtime so hooks can detect they are running under Codex CLI
       export OSC_RUNTIME=codex
-      export OSC_CODEX_WRAPPER=1
 
       if ((auto_task)); then
         auto_task_summary="$(auto_task_bootstrap "$root" "$extra_prompt")"
       fi
 
+      if ((auto_team)); then
+        auto_team_summary="$(auto_team_bootstrap "$root" "$team_template" "$team_runtime")"
+      fi
+
       local prompt
-      prompt="$(build_codex_prompt "$root" "$extra_prompt" "$auto_task_summary")"
+      prompt="$(build_codex_prompt "$root" "$extra_prompt" "$auto_team_summary" "$auto_task_summary")"
 
       # NOTE: macOS ships bash 3.2 by default. With `set -u`, expanding an empty
       # array like "${arr[@]}" triggers "unbound variable". So only expand when

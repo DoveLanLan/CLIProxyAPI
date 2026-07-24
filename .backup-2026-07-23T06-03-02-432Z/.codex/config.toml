@@ -1,0 +1,5 @@
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+OPEN_SPEC_CODE_USER = "hewei"

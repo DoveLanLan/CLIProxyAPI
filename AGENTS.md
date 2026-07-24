@@ -56,3 +56,19 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 - Use logrus structured logging; avoid leaking secrets/tokens in logs
 - Avoid panics in HTTP handlers; prefer logged errors and meaningful HTTP status codes
 - Timeouts are allowed only during credential acquisition; after an upstream connection is established, do not set timeouts for any subsequent network behavior. Intentional exceptions that must remain allowed are the Codex websocket liveness deadlines in `internal/runtime/executor/codex_websockets_executor.go`, the wsrelay session deadlines in `internal/wsrelay/session.go`, the management APICall timeout in `internal/api/handlers/management/api_tools.go`, and the `cmd/fetch_antigravity_models` utility timeouts
+
+<!-- open-spec-code:start -->
+## open-spec-code (osc)
+
+When working in this repository:
+- Read `.osc/workflow.md` and `.osc/spec/*/index.md` before making changes.
+- Use `.osc/scripts/get-context.sh` for current state (developer, current task, git status).
+- Persist key outputs to files (not only chat):
+  - `.osc/spec/project-spec.md`
+  - `.osc/tasks/<task-dir>/changes/...`
+  - `.osc/quality-gate.md`
+
+Codex CLI entrypoint:
+- Prefer starting via native `codex`; use the installed `project-spec` / `brainstorm` / `change-workflow` / `quality-gate` skills for the common repo workflow.
+- Keep `./osc codex` only for optional wrapper automation such as `--auto-task` or `--auto-gate`.
+<!-- open-spec-code:end -->

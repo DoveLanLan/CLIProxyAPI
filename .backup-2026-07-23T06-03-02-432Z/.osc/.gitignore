@@ -17,7 +17,6 @@
 
 # Task runtime files
 .plan-log
-update-report.md
 
 # Atomic/merge temp files
 *.tmp
