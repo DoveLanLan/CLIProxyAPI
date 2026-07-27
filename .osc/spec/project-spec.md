@@ -22,15 +22,15 @@ This repository is not a conventional browser frontend project. The interactive 
 
 - Repo root: `/Volumes/DevDrive/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
-- Current task: `.osc/tasks/07-01-sync-upstream-v7.2.48`
-- Immediate implication: deployment hotfixes must update that task's `changes/` artifacts before non-`.osc/` edits.
+- Current task: `.osc/tasks/07-27-xai-dedicated-proxy-pool`
+- Immediate implication: the xAI proxy-pool feature must keep its proposal/spec/tasks and closure artifacts under that task before non-`.osc/` edits.
 
 **Repo Snapshot**
 - **Modules/Components:** `cmd/server` is the runnable server entrypoint; `internal/{api,auth,cmd,config,logging,managementasset,runtime,store,tui,usage,watcher,wsrelay,...}` contains server-only runtime code; `sdk/{api,auth,cliproxy,config,logging,translator}` is the reusable embedding surface; `docs/`, `examples/`, and `test/` hold consumer docs, samples, and regression coverage. (confidence: High) — evidence: `README.md`, `cmd/server/main.go`, `internal/`, `sdk/`, `docs/`, `examples/`, `test/`
 - **Toolchains:** build uses Go modules plus `go build ./cmd/server`, a multi-stage Docker image, and GoReleaser archives (High); tests exist both as package tests and top-level regressions under `test/`, but the shallow CI inventory only enforces build on pull requests (Medium); no dedicated lint/staticcheck config was found at depth <= 2, so explicit source-format enforcement is mostly standard Go tooling plus review convention (Low). — evidence: `go.mod`, `Dockerfile`, `docker-compose.yml`, `.goreleaser.yml`, `.github/workflows/pr-test-build.yml`, `.github/workflows/release.yaml`, `.github/workflows/docker-image.yml`
 - **Style/Format Enforcement:** the strongest enforced process rules are the `osc` artifact-first workflow, protected `internal/translator/**` PR boundary, and comment-preserving config persistence through management handlers. (confidence: Medium) — evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.github/workflows/pr-path-guard.yml`, `internal/api/handlers/management/config_basic.go`, `internal/api/handlers/management/handler.go`
 - **CI Gates/Expectations:** pull requests must compile `./cmd/server`; pull requests touching `internal/translator/**` are rejected; main/tag pushes publish Docker images, and successful main Docker builds trigger the production deploy workflow. Tag pushes publish GoReleaser artifacts with embedded version metadata. (confidence: High) — evidence: `.github/workflows/pr-test-build.yml`, `.github/workflows/pr-path-guard.yml`, `.github/workflows/docker-image.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/release.yaml`, `.goreleaser.yml`, `Dockerfile`, `deploy/scripts/remote-deploy.sh`
-- **Open Questions (max 1):** None. The current repo state is sufficient to continue spec work, but later code changes still require task creation/selection because `current_task` is empty.
+- **Open Questions (max 1):** None. The current xAI proxy-pool task is selected and contains its proposal, spec, tasks, and closure artifacts.
 
 ## Product Surfaces
 
@@ -96,6 +96,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 4. For non-exempt code changes, create/select a task first and write `proposal.md`, `spec.md`, and `tasks.md` before touching source files. `.osc/` files are the safe place to start. — Evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.osc/scripts/task.sh` (Documented; confidence: High)
 5. Production split-proxy deployments that route to Docker-local Claude-compatible services must keep the sidecar on both the shared gateway network and the upstream service network. — Evidence: `deploy/compose.production.split-proxy.yml`, `deploy/SPLIT_PROXY_SETUP_CN.md` (Documented; confidence: High)
 6. Production Grok inspection systemd units are tracked under `deploy/systemd/` and installed by `deploy/scripts/remote-deploy.sh`; keep permanent disable classes aligned with `deploy/scripts/run-grok-inspection.sh` and never put the management key value in a unit. — Evidence: `deploy/systemd/grok-inspection.service`, `deploy/systemd/grok-inspection.timer`, `deploy/scripts/remote-deploy.sh` (Documented; confidence: High; added 2026-07-24)
+7. CPA-generated retry guidance may bypass upstream header passthrough only through a narrow managed-error contract; arbitrary upstream headers must remain controlled by `passthrough-headers`. — Evidence: `sdk/api/handlers/handlers.go`, `sdk/api/handlers/handlers_error_response_test.go` (Documented; confidence: High; added 2026-07-27)
 
 #### D) Testing strategy & coverage expectations
 1. Treat `go build -o test-output ./cmd/server` as the minimum must-pass pull-request gate, because that is the explicitly wired PR CI check. — Evidence: `.github/workflows/pr-test-build.yml` (Documented; confidence: High)
@@ -110,7 +111,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 ### Top 7 Constraints
 
-- Constraint 1: Current source changes should stay within `.osc/tasks/07-01-sync-upstream-v7.2.48` unless a new task is selected.
+- Constraint 1: Current source changes should stay within `.osc/tasks/07-27-xai-dedicated-proxy-pool` unless a new task is selected.
 - Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist or are updated, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
 - Constraint 3: Required repo artifacts do not live only in chat: baseline rules go in `.osc/spec/project-spec.md`, task change packages go in `.osc/tasks/<task-dir>/changes/`, and quality results go in `.osc/quality-gate.md`.
 - Constraint 4: This repository is primarily a Go proxy/server and embeddable SDK, not a bundled browser frontend. UI work in-tree normally means Bubble Tea TUI work or management asset integration.

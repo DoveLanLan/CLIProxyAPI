@@ -64,10 +64,11 @@ type codexWebsocketSession struct {
 
 	reqMu sync.Mutex
 
-	connMu sync.Mutex
-	conn   *websocket.Conn
-	wsURL  string
-	authID string
+	connMu   sync.Mutex
+	conn     *websocket.Conn
+	wsURL    string
+	authID   string
+	proxyURL string
 
 	writeMu sync.Mutex
 
@@ -212,19 +213,29 @@ func (s *codexWebsocketSession) configureConn(conn *websocket.Conn) {
 }
 
 func websocketSessionTargetChanged(sess *codexWebsocketSession, authID string, wsURL string) bool {
+	return websocketSessionTargetChangedWithProxy(sess, authID, wsURL, "")
+}
+
+func websocketSessionTargetChangedWithProxy(sess *codexWebsocketSession, authID string, wsURL string, proxyURL string) bool {
 	if sess == nil {
 		return false
 	}
 
 	sess.connMu.Lock()
 	defer sess.connMu.Unlock()
-	if strings.TrimSpace(sess.authID) == "" && strings.TrimSpace(sess.wsURL) == "" {
+	if strings.TrimSpace(sess.authID) == "" && strings.TrimSpace(sess.wsURL) == "" && strings.TrimSpace(sess.proxyURL) == "" {
 		return false
 	}
-	return strings.TrimSpace(sess.authID) != strings.TrimSpace(authID) || strings.TrimSpace(sess.wsURL) != strings.TrimSpace(wsURL)
+	return strings.TrimSpace(sess.authID) != strings.TrimSpace(authID) ||
+		strings.TrimSpace(sess.wsURL) != strings.TrimSpace(wsURL) ||
+		strings.TrimSpace(sess.proxyURL) != strings.TrimSpace(proxyURL)
 }
 
 func detachMismatchedWebsocketSessionConn(sess *codexWebsocketSession, authID string, wsURL string) (*websocket.Conn, string, string) {
+	return detachMismatchedWebsocketSessionConnWithProxy(sess, authID, wsURL, "")
+}
+
+func detachMismatchedWebsocketSessionConnWithProxy(sess *codexWebsocketSession, authID string, wsURL string, proxyURL string) (*websocket.Conn, string, string) {
 	if sess == nil {
 		return nil, "", ""
 	}
@@ -232,13 +243,16 @@ func detachMismatchedWebsocketSessionConn(sess *codexWebsocketSession, authID st
 	sess.connMu.Lock()
 	defer sess.connMu.Unlock()
 	conn := sess.conn
-	if conn == nil || (strings.TrimSpace(sess.authID) == strings.TrimSpace(authID) && strings.TrimSpace(sess.wsURL) == strings.TrimSpace(wsURL)) {
+	if conn == nil || (strings.TrimSpace(sess.authID) == strings.TrimSpace(authID) &&
+		strings.TrimSpace(sess.wsURL) == strings.TrimSpace(wsURL) &&
+		strings.TrimSpace(sess.proxyURL) == strings.TrimSpace(proxyURL)) {
 		return nil, "", ""
 	}
 
 	previousAuthID := sess.authID
 	previousWSURL := sess.wsURL
 	sess.conn = nil
+	sess.proxyURL = ""
 	if sess.readerConn == conn {
 		sess.readerConn = nil
 	}

@@ -5,6 +5,7 @@ This directory contains the production deployment artifacts for the forked VPS d
 Additional guide:
 
 - Chinese split-proxy setup: [SPLIT_PROXY_SETUP_CN.md](/root/Projects/Go/src/CLIProxyAPI/deploy/SPLIT_PROXY_SETUP_CN.md)
+- Chinese xAI proxy-pool setup: [XAI_PROXY_POOL_SETUP_CN.md](XAI_PROXY_POOL_SETUP_CN.md)
 
 ## Topology
 
@@ -23,12 +24,17 @@ Recommended root on the VPS:
   .env
   compose.production.yml
   compose.production.split-proxy.yml
+  compose.production.xai-proxy.yml
   data/config.yaml
   data/auths/
   data/logs/
   data/logs/split-proxy/
   data/plugins/
   data/grok-inspection/
+  data/mihomo/
+  data/xai-proxy-pool/
+  secrets/xai-proxy/controller-secret
+  data/mihomo/config.yaml
   split-proxy/start.sh
   scripts/remote-deploy.sh
   systemd/grok-inspection.service
@@ -50,12 +56,28 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
+   - `ENABLE_XAI_PROXY_POOL=true` only after creating the private Mihomo files
    - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` only when split-proxy is enabled
 3. Create `data/config.yaml` on the VPS.
 4. Create `data/auths/` and place any existing auth files there if needed.
 5. Ensure `data/logs/`, `data/plugins/`, and `data/grok-inspection/` exist and are writable.
    When split-proxy is enabled, `data/logs/split-proxy/` will be used for Squid logs.
 6. Ensure the shared gateway stack exists and mounts the certificate directory expected by `api.heweili.top.conf`.
+
+## xAI Proxy Pool Option
+
+The optional `compose.production.xai-proxy.yml` overlay runs one unprivileged
+Mihomo sidecar for xAI traffic only. It exposes six lane listeners and one probe
+listener on the private Compose network, persists provider caches separately,
+and gives the CPA container read-only access to the controller secret. It does
+not publish host ports or change system routing.
+
+Keep the one-time bootstrap in `data/mihomo/config.yaml`; after subscription
+management is enabled, submit all write-only URLs through the private Management
+API and do not edit generated providers manually. The repository contains only
+`mihomo/config.example.yaml`. See
+[XAI_PROXY_POOL_SETUP_CN.md](XAI_PROXY_POOL_SETUP_CN.md)
+for staged rollout and rollback steps.
 
 ## Dynamic Plugins
 

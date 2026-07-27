@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -439,7 +440,7 @@ func (e *XAIWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *cliprox
 		}
 	}
 	if idMapper != nil {
-		if websocketSessionTargetChanged(sess, authID, wsURL) {
+		if websocketSessionTargetChangedWithProxy(sess, authID, wsURL, xaiProxySessionTarget(auth)) {
 			idMapper.upstreamPreviousID = ""
 		}
 		prepared.body = idMapper.upstreamRequestPayload(prepared.body)
@@ -950,7 +951,8 @@ func (e *XAIWebsocketsExecutor) ensureUpstreamConn(ctx context.Context, auth *cl
 		return e.dialXAIWebsocket(ctx, auth, wsURL, headers)
 	}
 
-	if staleConn, staleAuthID, staleWSURL := detachMismatchedWebsocketSessionConn(sess, authID, wsURL); staleConn != nil {
+	proxyTarget := xaiProxySessionTarget(auth)
+	if staleConn, staleAuthID, staleWSURL := detachMismatchedWebsocketSessionConnWithProxy(sess, authID, wsURL, proxyTarget); staleConn != nil {
 		logXAIWebsocketDisconnected(sess.sessionID, staleAuthID, staleWSURL, "target_changed", nil)
 		if errClose := staleConn.Close(); errClose != nil {
 			log.Errorf("xai websockets executor: close stale websocket error: %v", errClose)
@@ -989,6 +991,7 @@ func (e *XAIWebsocketsExecutor) ensureUpstreamConn(ctx context.Context, auth *cl
 	sess.conn = conn
 	sess.wsURL = wsURL
 	sess.authID = authID
+	sess.proxyURL = proxyTarget
 	sess.readerConn = conn
 	sess.connMu.Unlock()
 
@@ -996,6 +999,24 @@ func (e *XAIWebsocketsExecutor) ensureUpstreamConn(ctx context.Context, auth *cl
 	go e.readUpstreamLoop(sess, conn)
 	logXAIWebsocketConnected(sess.sessionID, authID, wsURL)
 	return conn, resp, nil
+}
+
+func xaiProxyURL(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	return strings.TrimSpace(auth.ProxyURL)
+}
+
+func xaiProxySessionTarget(auth *cliproxyauth.Auth) string {
+	proxyURL := xaiProxyURL(auth)
+	if auth == nil || auth.Attributes == nil {
+		return proxyURL
+	}
+	if route := strings.TrimSpace(auth.Attributes[xaiProxyRouteAttribute]); route != "" {
+		return proxyURL + "\x00" + route
+	}
+	return proxyURL
 }
 
 func configureXAIWebsocketConn(sess *codexWebsocketSession, conn *websocket.Conn) {
@@ -1390,14 +1411,26 @@ func CloseXAIWebsocketSessionsForAuthID(authID string, reason string) {
 // when the downstream transport is websocket and the selected auth enables
 // websockets. Non-stream requests keep using the HTTP implementation.
 type XAIAutoExecutor struct {
-	httpExec *XAIExecutor
-	wsExec   *XAIWebsocketsExecutor
+	httpExec  *XAIExecutor
+	wsExec    *XAIWebsocketsExecutor
+	proxyPool *helps.XAIProxyPool
 }
 
 func NewXAIAutoExecutor(cfg *config.Config) *XAIAutoExecutor {
+	poolConfig := config.XAIProxyPoolConfig{}
+	if cfg != nil {
+		poolConfig = cfg.XAIProxyPool
+	}
+	pool := helps.NewXAIProxyPool(poolConfig)
+	httpExec := NewXAIExecutor(cfg)
 	return &XAIAutoExecutor{
-		httpExec: NewXAIExecutor(cfg),
-		wsExec:   NewXAIWebsocketsExecutor(cfg),
+		httpExec: httpExec,
+		wsExec: &XAIWebsocketsExecutor{
+			XAIExecutor: httpExec,
+			store:       globalXAIWebsocketSessionStore,
+			idStore:     globalXAIWebsocketIDStates,
+		},
+		proxyPool: pool,
 	}
 }
 
@@ -1414,31 +1447,132 @@ func (e *XAIAutoExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Au
 	if e == nil || e.httpExec == nil {
 		return nil, fmt.Errorf("xai auto executor: http executor is nil")
 	}
-	return e.httpExec.HttpRequest(ctx, auth, req)
+	if req == nil {
+		return nil, fmt.Errorf("xai auto executor: request is nil")
+	}
+	routed, errRoute := e.routedAuth(ctx, auth)
+	if errRoute != nil {
+		return nil, errRoute
+	}
+	firstReq := req.Clone(nonNilXAIContext(ctx, req.Context()))
+	firstReq.Body = req.Body
+	resp, errDo := e.httpExec.HttpRequest(ctx, routed.auth, firstReq)
+	if !routed.used {
+		return resp, errDo
+	}
+	if errDo != nil {
+		if isXAIProxyNetworkError(errDo) {
+			next, retry, errNetwork := e.proxyPool.HandlePreconnectFailure(ctx, routed.route)
+			if errNetwork != nil {
+				return nil, errNetwork
+			}
+			if retry {
+				retryReq, errRetryReq := cloneReplayableXAIRequest(ctx, req)
+				if errRetryReq != nil {
+					return nil, errRetryReq
+				}
+				retryResp, errRetry := e.httpExec.HttpRequest(ctx, cloneXAIAuthWithRoute(auth, next), retryReq)
+				if isXAIProxyNetworkError(errRetry) {
+					return nil, &xaiProxyRequestScopedNetworkError{cause: errRetry}
+				}
+				if errRetry != nil {
+					return nil, errRetry
+				}
+				return e.handleXAIProxyHTTPResponse(ctx, auth, req, next, retryResp)
+			}
+			return nil, &xaiProxyRequestScopedNetworkError{cause: errDo}
+		}
+		return nil, errDo
+	}
+	return e.handleXAIProxyHTTPResponse(ctx, auth, req, routed.route, resp)
+}
+
+func (e *XAIAutoExecutor) handleXAIProxyHTTPResponse(ctx context.Context, auth *cliproxyauth.Auth, req *http.Request, route helps.XAIProxyRoute, resp *http.Response) (*http.Response, error) {
+	blocked, _, errInspect := responseIsXAIBlockedSpendingLimit(resp)
+	if errInspect != nil {
+		if errClose := resp.Body.Close(); errClose != nil {
+			errInspect = errors.Join(errInspect, errClose)
+		}
+		return nil, errInspect
+	}
+	if !blocked {
+		return resp, nil
+	}
+	if errClose := resp.Body.Close(); errClose != nil {
+		return nil, fmt.Errorf("xai proxy pool: close blocked response: %w", errClose)
+	}
+	e.proxyPool.RecordExact402()
+	lease, errProbe := e.proxyPool.AcquireProbe(ctx, route)
+	if errProbe != nil {
+		return nil, errProbe
+	}
+	retryReq, errRetryReq := cloneReplayableXAIRequest(ctx, req)
+	if errRetryReq != nil {
+		lease.Unavailable()
+		return nil, errRetryReq
+	}
+	alternate, errAlternate := e.httpExec.HttpRequest(ctx, cloneXAIAuthWithRoute(auth, lease.Route), retryReq)
+	if errAlternate != nil {
+		lease.Unavailable()
+		return nil, &helps.XAIProxyPoolError{Message: "xai proxy pool could not verify the suspected blocked egress", Retry: 30 * time.Second}
+	}
+	alternateBlocked, _, errAlternateInspect := responseIsXAIBlockedSpendingLimit(alternate)
+	if errAlternateInspect != nil {
+		lease.Unavailable()
+		if errClose := alternate.Body.Close(); errClose != nil {
+			log.WithError(errClose).Debug("xai proxy pool: close uninspectable alternate response")
+		}
+		return nil, &helps.XAIProxyPoolError{Message: "xai proxy pool could not inspect the alternate response", Retry: 30 * time.Second}
+	}
+	if alternateBlocked {
+		lease.CredentialFailure()
+		return alternate, nil
+	}
+	if alternate.StatusCode < http.StatusOK || alternate.StatusCode >= http.StatusMultipleChoices {
+		lease.Unavailable()
+		if errClose := alternate.Body.Close(); errClose != nil {
+			return nil, fmt.Errorf("xai proxy pool: close inconclusive alternate response: %w", errClose)
+		}
+		return nil, &helps.XAIProxyPoolError{Message: "xai proxy pool alternate response was inconclusive", Retry: 30 * time.Second}
+	}
+	if errConfirm := lease.ConfirmIPBlock(ctx); errConfirm != nil {
+		if errClose := alternate.Body.Close(); errClose != nil {
+			return nil, fmt.Errorf("xai proxy pool: close alternate response after promotion failure: %w", errClose)
+		}
+		return nil, &helps.XAIProxyPoolError{Message: "xai proxy pool could not promote the verified alternate", Retry: 30 * time.Second}
+	}
+	return alternate, nil
 }
 
 func (e *XAIAutoExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
 	if e == nil || e.httpExec == nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("xai auto executor: executor is nil")
 	}
-	return e.httpExec.Execute(ctx, auth, req, opts)
+	return executeXAIWithProxyPool(ctx, e, auth, func(routedAuth *cliproxyauth.Auth) (cliproxyexecutor.Response, error) {
+		return e.httpExec.Execute(ctx, routedAuth, req, opts)
+	})
 }
 
 func (e *XAIAutoExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
 	if e == nil || e.httpExec == nil || e.wsExec == nil {
 		return nil, fmt.Errorf("xai auto executor: executor is nil")
 	}
-	if cliproxyexecutor.DownstreamWebsocket(ctx) && xaiWebsocketsEnabled(auth) {
-		return e.wsExec.ExecuteStream(ctx, auth, req, opts)
-	}
-	return e.httpExec.ExecuteStream(ctx, auth, req, opts)
+	return e.executeStreamWithProxyPool(ctx, auth, func(routedAuth *cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error) {
+		if cliproxyexecutor.DownstreamWebsocket(ctx) && xaiWebsocketsEnabled(routedAuth) {
+			return e.wsExec.ExecuteStream(ctx, routedAuth, req, opts)
+		}
+		return e.httpExec.ExecuteStream(ctx, routedAuth, req, opts)
+	})
 }
 
 func (e *XAIAutoExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
 	if e == nil || e.httpExec == nil {
 		return nil, fmt.Errorf("xai auto executor: http executor is nil")
 	}
-	return e.httpExec.Refresh(ctx, auth)
+	refreshed, errRefresh := executeXAIWithProxyPool(ctx, e, auth, func(routedAuth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+		return e.httpExec.Refresh(ctx, routedAuth)
+	})
+	return restoreXAIAuthProxy(refreshed, auth), errRefresh
 }
 
 func (e *XAIAutoExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
@@ -1449,10 +1583,92 @@ func (e *XAIAutoExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Au
 }
 
 func (e *XAIAutoExecutor) CloseExecutionSession(sessionID string) {
-	if e == nil || e.wsExec == nil {
+	if e == nil {
 		return
 	}
-	e.wsExec.CloseExecutionSession(sessionID)
+	if sessionID == cliproxyauth.CloseAllExecutionSessionsID && e.proxyPool != nil {
+		e.proxyPool.Close()
+	}
+	if e.wsExec != nil {
+		e.wsExec.CloseExecutionSession(sessionID)
+	}
+}
+
+func (e *XAIAutoExecutor) XAIProxyPoolStatus() helps.XAIProxyPoolStatus {
+	if e == nil || e.proxyPool == nil {
+		return helps.XAIProxyPoolStatus{}
+	}
+	return e.proxyPool.Status()
+}
+
+func (e *XAIAutoExecutor) RefreshXAIProxyProviders(ctx context.Context) error {
+	if e == nil || e.proxyPool == nil {
+		return &helps.XAIProxyPoolError{Message: "xai proxy pool is unavailable", Retry: 30 * time.Second}
+	}
+	return e.proxyPool.RefreshProviders(ctx)
+}
+
+func (e *XAIAutoExecutor) RotateXAIProxyLane(ctx context.Context, lane string) error {
+	if e == nil || e.proxyPool == nil {
+		return &helps.XAIProxyPoolError{Message: "xai proxy pool is unavailable", Retry: 30 * time.Second}
+	}
+	return e.proxyPool.RotateLane(ctx, lane)
+}
+
+func (e *XAIAutoExecutor) CheckXAIProxyLane(ctx context.Context, lane string) (bool, error) {
+	if e == nil || e.proxyPool == nil {
+		return false, &helps.XAIProxyPoolError{Message: "xai proxy pool is unavailable", Retry: 30 * time.Second}
+	}
+	return e.proxyPool.CheckLane(ctx, lane)
+}
+
+func (e *XAIAutoExecutor) QuarantineXAIProxyIP(ctx context.Context, ip string) error {
+	if e == nil || e.proxyPool == nil {
+		return &helps.XAIProxyPoolError{Message: "xai proxy pool is unavailable", Retry: 30 * time.Second}
+	}
+	return e.proxyPool.QuarantineIP(ctx, ip)
+}
+
+func (e *XAIAutoExecutor) UnquarantineXAIProxyIP(ip string) error {
+	if e == nil || e.proxyPool == nil {
+		return &helps.XAIProxyPoolError{Message: "xai proxy pool is unavailable", Retry: 30 * time.Second}
+	}
+	return e.proxyPool.UnquarantineIP(ip)
+}
+
+func (e *XAIAutoExecutor) XAIProxySubscriptions(ctx context.Context) helps.XAIProxySubscriptionList {
+	if e == nil || e.proxyPool == nil {
+		return helps.XAIProxySubscriptionList{}
+	}
+	return e.proxyPool.XAIProxySubscriptions(ctx)
+}
+
+func (e *XAIAutoExecutor) CreateXAIProxySubscription(ctx context.Context, expectedRevision uint64, input helps.XAIProxySubscriptionCreate) (helps.XAIProxySubscriptionList, error) {
+	if e == nil || e.proxyPool == nil {
+		return helps.XAIProxySubscriptionList{}, &helps.XAIProxySubscriptionError{Code: "subscription_management_unavailable", Message: "xAI subscription management is unavailable", Status: http.StatusServiceUnavailable}
+	}
+	return e.proxyPool.CreateXAIProxySubscription(ctx, expectedRevision, input)
+}
+
+func (e *XAIAutoExecutor) UpdateXAIProxySubscription(ctx context.Context, expectedRevision uint64, name string, input helps.XAIProxySubscriptionUpdate) (helps.XAIProxySubscriptionList, error) {
+	if e == nil || e.proxyPool == nil {
+		return helps.XAIProxySubscriptionList{}, &helps.XAIProxySubscriptionError{Code: "subscription_management_unavailable", Message: "xAI subscription management is unavailable", Status: http.StatusServiceUnavailable}
+	}
+	return e.proxyPool.UpdateXAIProxySubscription(ctx, expectedRevision, name, input)
+}
+
+func (e *XAIAutoExecutor) DeleteXAIProxySubscription(ctx context.Context, expectedRevision uint64, name string) (helps.XAIProxySubscriptionList, error) {
+	if e == nil || e.proxyPool == nil {
+		return helps.XAIProxySubscriptionList{}, &helps.XAIProxySubscriptionError{Code: "subscription_management_unavailable", Message: "xAI subscription management is unavailable", Status: http.StatusServiceUnavailable}
+	}
+	return e.proxyPool.DeleteXAIProxySubscription(ctx, expectedRevision, name)
+}
+
+func (e *XAIAutoExecutor) CheckXAIProxySubscription(ctx context.Context, name string) (helps.XAIProxySubscriptionStatus, error) {
+	if e == nil || e.proxyPool == nil {
+		return helps.XAIProxySubscriptionStatus{}, &helps.XAIProxySubscriptionError{Code: "subscription_management_unavailable", Message: "xAI subscription management is unavailable", Status: http.StatusServiceUnavailable}
+	}
+	return e.proxyPool.CheckXAIProxySubscription(ctx, name)
 }
 
 func (e *XAIAutoExecutor) UpstreamDisconnectChan(sessionID string) <-chan error {

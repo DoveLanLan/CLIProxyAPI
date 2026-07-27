@@ -1,0 +1,13 @@
+{
+  "name": "Add xAI dedicated rotating proxy pool",
+  "type": "feature",
+  "branch": "task/xai-dedicated-proxy-pool",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [],
+  "status": "planned",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "pending"
+}
