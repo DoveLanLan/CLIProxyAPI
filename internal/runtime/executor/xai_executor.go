@@ -810,6 +810,9 @@ func (e *XAIExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cl
 	svc := xaiauth.NewXAIAuthWithProxyURL(e.cfg, auth.ProxyURL)
 	td, err := svc.RefreshTokens(ctx, refreshToken, tokenEndpoint)
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "invalid_grant") {
+			return nil, statusErr{code: http.StatusUnauthorized, msg: err.Error()}
+		}
 		return nil, err
 	}
 	if auth.Metadata == nil {

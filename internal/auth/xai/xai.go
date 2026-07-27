@@ -132,6 +132,7 @@ func (a *XAIAuth) RequestDeviceCode(ctx context.Context, deviceAuthorizationEndp
 	form := url.Values{
 		"client_id": {ClientID},
 		"scope":     {Scope},
+		"referrer":  {"grok-build"},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deviceAuthorizationEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -139,6 +140,7 @@ func (a *XAIAuth) RequestDeviceCode(ctx context.Context, deviceAuthorizationEndp
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	applyDeviceFlowHeaders(req)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -267,6 +269,7 @@ func (a *XAIAuth) exchangeDeviceCode(ctx context.Context, tokenEndpoint, deviceC
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	applyDeviceFlowHeaders(req)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -325,6 +328,14 @@ func (a *XAIAuth) exchangeDeviceCode(ctx context.Context, tokenEndpoint, deviceC
 
 	email, subject := parseJWTIdentity(payload.IDToken)
 	return buildTokenData(payload.AccessToken, payload.RefreshToken, payload.IDToken, payload.TokenType, payload.ExpiresIn, email, subject), nil, interval, false
+}
+
+func applyDeviceFlowHeaders(req *http.Request) {
+	if req == nil {
+		return
+	}
+	req.Header.Set("x-grok-client-version", ClientVersion)
+	req.Header.Set("x-grok-client-surface", DeviceClientSurface)
 }
 
 // RefreshTokens refreshes an xAI access token.

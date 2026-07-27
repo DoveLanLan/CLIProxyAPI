@@ -41,6 +41,7 @@ func TestRequestDeviceCodePostsClientIDAndScope(t *testing.T) {
 		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/x-www-form-urlencoded") {
 			t.Fatalf("Content-Type = %q, want form", got)
 		}
+		assertDeviceFlowHeaders(t, r)
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm() error = %v", err)
 		}
@@ -77,11 +78,15 @@ func TestRequestDeviceCodePostsClientIDAndScope(t *testing.T) {
 	if gotForm.Get("scope") != Scope {
 		t.Fatalf("scope = %q, want %q", gotForm.Get("scope"), Scope)
 	}
+	if gotForm.Get("referrer") != "grok-build" {
+		t.Fatalf("referrer = %q, want grok-build", gotForm.Get("referrer"))
+	}
 }
 
 func TestPollForTokenExchangesDeviceCode(t *testing.T) {
 	var pollCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertDeviceFlowHeaders(t, r)
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm() error = %v", err)
 		}
@@ -324,4 +329,14 @@ func fakeJWTWithEmail(email, subject string) string {
 	header := base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payload := base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString([]byte(`{"email":"` + email + `","sub":"` + subject + `"}`))
 	return header + "." + payload + ".sig"
+}
+
+func assertDeviceFlowHeaders(t *testing.T, r *http.Request) {
+	t.Helper()
+	if got := r.Header.Get("x-grok-client-version"); got != ClientVersion {
+		t.Fatalf("x-grok-client-version = %q, want %q", got, ClientVersion)
+	}
+	if got := r.Header.Get("x-grok-client-surface"); got != DeviceClientSurface {
+		t.Fatalf("x-grok-client-surface = %q, want %q", got, DeviceClientSurface)
+	}
 }

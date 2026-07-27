@@ -37,6 +37,37 @@ func testContextWithAPIKey(apiKey string) context.Context {
 	return context.WithValue(context.Background(), "gin", ginCtx)
 }
 
+func TestXAIExecutorRefreshClassifiesInvalidGrantAsUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Refresh token has been revoked"}`))
+	}))
+	defer server.Close()
+
+	exec := NewXAIExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{
+		ID:       "xai-invalid-grant",
+		Provider: "xai",
+		Metadata: map[string]any{
+			"refresh_token":  "revoked-refresh-token",
+			"token_endpoint": server.URL,
+		},
+	}
+
+	_, err := exec.Refresh(context.Background(), auth)
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want invalid_grant error")
+	}
+	var status interface{ StatusCode() int }
+	if !errors.As(err, &status) {
+		t.Fatalf("Refresh() error = %T, want status error", err)
+	}
+	if got := status.StatusCode(); got != http.StatusUnauthorized {
+		t.Fatalf("Refresh() status = %d, want %d", got, http.StatusUnauthorized)
+	}
+}
+
 func TestXAIExecutorExecuteShapesResponsesRequest(t *testing.T) {
 	var gotPath string
 	var gotAuth string

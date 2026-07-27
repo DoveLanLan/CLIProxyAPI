@@ -1,0 +1,14 @@
+{
+  "name": "Limit xAI credential refresh storm",
+  "type": "bugfix",
+  "branch": "task/limit-xai-refresh-storm",
+  "priority": "P1",
+  "description": "Stop disabled and permanently invalid xAI credentials from repeatedly refreshing, and cap production refresh concurrency.",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "ready",
+  "completed_at": "2026-07-24T15:46:00Z"
+}

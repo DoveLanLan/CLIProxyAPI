@@ -262,3 +262,49 @@
 - Compatibility: No Go/API behavior changed; non-systemd hosts receive a warning and continue deployment.
 - Performance: Three workers, CPU quota, memory limit, and the five-minute interval remain unchanged.
 - Rollback: Revert the deploy files and restore the timestamped production unit backup documented in the task rollback notes.
+
+---
+
+# Quality Gate Addendum: limit xAI credential refresh storm
+
+- Date: 2026-07-24
+- Scope: Stop disabled/permanently invalid xAI credentials from repeatedly refreshing and reduce pressure on the shared upstream proxy.
+
+## Executed repository gates
+
+1. Focused scheduler and xAI refresh tests
+   - Result: Passed; disabled auths are unscheduled and explicit `invalid_grant` maps to unauthorized.
+2. Affected package tests
+   - Commands: `go test ./sdk/cliproxy/auth -count=1`; `go test ./internal/runtime/executor -count=1`.
+   - Result: Passed.
+3. Full tests
+   - Command: `go test ./... -count=1`.
+   - Result: Passed in the canonical local project. The first canonical run hit one unrelated 120-second cancellation-test timeout; that test passed immediately in isolation and the complete rerun passed.
+4. Required server build
+   - Command: `go build -o test-output ./cmd/server && rm test-output`.
+   - Result: Passed in the canonical local project.
+5. Formatting and diff checks
+   - Commands: `gofmt`; `git diff --check`.
+   - Result: Passed.
+6. Protected path check
+   - Result: Passed; no `internal/translator/**` files changed.
+
+## Executed production gates
+
+1. Image identity and service health
+   - Result: Passed; `cliproxyapi:xai-refresh-fix-20260724` is running and the private management endpoint returns HTTP 200.
+2. Runtime configuration
+   - Result: Passed; two auto-refresh workers, 300-second transient cooldown, bounded request retries, and 15-second SSE keepalive are active.
+3. Refresh audit
+   - Result: Passed; zero disabled credentials refreshed. The observed `invalid_grant` ran once and did not recur after the legacy five-minute backoff interval.
+4. End-to-end request
+   - Result: Passed; a real Claude-compatible Grok stream completed through Cloudflare with HTTP 200 and `message_stop`.
+5. Gateway observation
+   - Result: Passed; the post-verification window contained successful `/v1/messages` responses and no 429/500/502/503/504/524 response.
+
+## Final self-review
+
+- Security: No credential contents or management key were added to source artifacts.
+- Data safety: No credential files were deleted; the pre-change config backup is retained.
+- Recovery: Re-enabling a credential returns it to normal automatic refresh scheduling.
+- Rollback: Restore the timestamped config backup and recreate the service with the previous GHCR image.

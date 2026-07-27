@@ -5987,6 +5987,9 @@ func (m *Manager) shouldRefresh(a *Auth, now time.Time) bool {
 	if a == nil {
 		return false
 	}
+	if a.Disabled {
+		return false
+	}
 	if hasUnauthorizedAuthFailure(a) {
 		return false
 	}
