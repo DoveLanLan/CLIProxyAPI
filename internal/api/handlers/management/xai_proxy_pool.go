@@ -11,12 +11,12 @@ import (
 )
 
 type xaiProxyPoolOperator interface {
-	XAIProxyPoolStatus() helps.XAIProxyPoolStatus
+	XAIProxyPoolStatus(context.Context) helps.XAIProxyPoolStatus
 	RefreshXAIProxyProviders(context.Context) error
 	RotateXAIProxyLane(context.Context, string) error
 	CheckXAIProxyLane(context.Context, string) (bool, error)
 	QuarantineXAIProxyIP(context.Context, string) error
-	UnquarantineXAIProxyIP(string) error
+	UnquarantineXAIProxyIP(context.Context, string) error
 }
 
 func (h *Handler) xaiProxyPoolOperator() (xaiProxyPoolOperator, bool) {
@@ -37,7 +37,7 @@ func (h *Handler) GetXAIProxyPoolStatus(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "xai proxy pool executor is unavailable"})
 		return
 	}
-	status := operator.XAIProxyPoolStatus()
+	status := operator.XAIProxyPoolStatus(c.Request.Context())
 	if !status.Enabled {
 		c.JSON(http.StatusConflict, gin.H{"error": "xai proxy pool is disabled", "status": status})
 		return
@@ -54,7 +54,7 @@ func (h *Handler) RefreshXAIProxyProviders(c *gin.Context) {
 		writeXAIProxyPoolError(c, errRefresh)
 		return
 	}
-	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus())
+	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus(c.Request.Context()))
 }
 
 func (h *Handler) RotateXAIProxyLane(c *gin.Context) {
@@ -71,7 +71,7 @@ func (h *Handler) RotateXAIProxyLane(c *gin.Context) {
 		writeXAIProxyPoolError(c, errRotate)
 		return
 	}
-	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus())
+	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus(c.Request.Context()))
 }
 
 func (h *Handler) CheckXAIProxyLane(c *gin.Context) {
@@ -89,7 +89,7 @@ func (h *Handler) CheckXAIProxyLane(c *gin.Context) {
 		writeXAIProxyPoolError(c, errCheck)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"lane": lane, "healthy": healthy, "status": operator.XAIProxyPoolStatus()})
+	c.JSON(http.StatusOK, gin.H{"lane": lane, "healthy": healthy, "status": operator.XAIProxyPoolStatus(c.Request.Context())})
 }
 
 func (h *Handler) QuarantineXAIProxyIP(c *gin.Context) {
@@ -108,7 +108,7 @@ func (h *Handler) QuarantineXAIProxyIP(c *gin.Context) {
 		writeXAIProxyPoolError(c, errQuarantine)
 		return
 	}
-	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus())
+	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus(c.Request.Context()))
 }
 
 func (h *Handler) UnquarantineXAIProxyIP(c *gin.Context) {
@@ -121,11 +121,11 @@ func (h *Handler) UnquarantineXAIProxyIP(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ip is required"})
 		return
 	}
-	if errUnquarantine := operator.UnquarantineXAIProxyIP(ip); errUnquarantine != nil {
+	if errUnquarantine := operator.UnquarantineXAIProxyIP(c.Request.Context(), ip); errUnquarantine != nil {
 		writeXAIProxyPoolError(c, errUnquarantine)
 		return
 	}
-	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus())
+	c.JSON(http.StatusOK, operator.XAIProxyPoolStatus(c.Request.Context()))
 }
 
 func (h *Handler) requireXAIProxyPool(c *gin.Context) (xaiProxyPoolOperator, bool) {
@@ -134,7 +134,7 @@ func (h *Handler) requireXAIProxyPool(c *gin.Context) (xaiProxyPoolOperator, boo
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "xai proxy pool executor is unavailable"})
 		return nil, false
 	}
-	if !operator.XAIProxyPoolStatus().Enabled {
+	if !operator.XAIProxyPoolStatus(c.Request.Context()).Enabled {
 		c.JSON(http.StatusConflict, gin.H{"error": "xai proxy pool is disabled"})
 		return nil, false
 	}

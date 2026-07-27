@@ -126,12 +126,12 @@ func executeXAIWithProxyPool[T any](ctx context.Context, e *XAIAutoExecutor, aut
 
 func retryBlockedXAI[T any](ctx context.Context, e *XAIAutoExecutor, auth *cliproxyauth.Auth, current helps.XAIProxyRoute, run func(*cliproxyauth.Auth) (T, error)) (T, error) {
 	var zero T
-	e.proxyPool.RecordExact402()
+	e.proxyPool.RecordExact402(ctx)
 	lease, errProbe := e.proxyPool.AcquireProbe(ctx, current)
 	if errProbe != nil {
 		return zero, errProbe
 	}
-	alternate, errAlternate := run(cloneXAIAuthWithRoute(auth, lease.Route))
+	alternate, errAlternate := run(cloneXAIAuthWithRoute(auth, lease.AlternateRoute()))
 	if errAlternate == nil {
 		if errConfirm := lease.ConfirmIPBlock(ctx); errConfirm != nil {
 			return zero, &helps.XAIProxyPoolError{Message: "xai proxy pool could not promote the verified alternate", Retry: 30 * time.Second}
@@ -198,12 +198,12 @@ func (e *XAIAutoExecutor) retryXAIStreamAfterNetworkFailure(ctx context.Context,
 }
 
 func (e *XAIAutoExecutor) retryBlockedXAIStream(ctx context.Context, auth *cliproxyauth.Auth, current helps.XAIProxyRoute, run func(*cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error)) (*cliproxyexecutor.StreamResult, error) {
-	e.proxyPool.RecordExact402()
+	e.proxyPool.RecordExact402(ctx)
 	lease, errProbe := e.proxyPool.AcquireProbe(ctx, current)
 	if errProbe != nil {
 		return nil, errProbe
 	}
-	alternateStream, errAlternate := run(cloneXAIAuthWithRoute(auth, lease.Route))
+	alternateStream, errAlternate := run(cloneXAIAuthWithRoute(auth, lease.AlternateRoute()))
 	if errAlternate != nil {
 		if isXAIBlockedSpendingLimit(errAlternate) {
 			lease.CredentialFailure()
@@ -226,7 +226,7 @@ func (e *XAIAutoExecutor) retryBlockedXAIStream(ctx context.Context, auth *clipr
 		drainXAIProxyStream(alternateStream)
 		return nil, &helps.XAIProxyPoolError{Message: "xai proxy pool could not promote the verified alternate", Retry: 30 * time.Second}
 	}
-	observedRoute := lease.Route
+	observedRoute := lease.AlternateRoute()
 	observedRoute.LaneName = current.LaneName
 	observedRoute.Selector = current.Selector
 	return wrapXAIProxyStream(ctx, e.proxyPool, observedRoute, alternateStream, buffered, closed), nil
@@ -262,13 +262,13 @@ func readXAIProxyStreamBootstrap(ctx context.Context, stream *cliproxyexecutor.S
 	}
 }
 
-func wrapXAIProxyStream(ctx context.Context, pool *helps.XAIProxyPool, route helps.XAIProxyRoute, stream *cliproxyexecutor.StreamResult, buffered []cliproxyexecutor.StreamChunk, closed bool) *cliproxyexecutor.StreamResult {
+func wrapXAIProxyStream(ctx context.Context, pool xaiProxyPoolClient, route helps.XAIProxyRoute, stream *cliproxyexecutor.StreamResult, buffered []cliproxyexecutor.StreamChunk, closed bool) *cliproxyexecutor.StreamResult {
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)
 		emit := func(chunk cliproxyexecutor.StreamChunk) bool {
 			if chunk.Err != nil && isXAIProxyNetworkError(chunk.Err) {
-				pool.ObserveMidResponseFailure(route)
+				pool.ObserveMidResponseFailure(ctx, route)
 				chunk.Err = &xaiProxyRequestScopedNetworkError{cause: chunk.Err}
 			}
 			if ctx == nil {

@@ -106,49 +106,14 @@ redis-usage-queue-retention-seconds: 60
 # Per-entry proxy-url also supports "direct" or "none" to bypass both the global proxy-url and environment proxies explicitly.
 proxy-url: ""
 
-# Optional xAI-only proxy pool. Disabled by default. When enabled, credentials
-# without an explicit proxy_url are deterministically assigned to one lane and
-# do not use the global proxy-url. The controller secret is read from a file;
-# never put subscription URLs or secret contents in this config.
+# Optional xAI-only proxy pool. Disabled by default. The standalone
+# EgressProxyPool service owns subscriptions, Mihomo, lanes, health, and state.
+# CLIProxyAPI sends only an HMAC digest of the auth ID and keeps exact-402 retry
+# decisions local. Explicit auth proxy_url values still bypass the pool.
 xai-proxy-pool:
   enabled: false
-  rollout-percent: 100
-  controller-url: "http://mihomo:9090"
-  controller-secret-file: "/run/secrets/mihomo-controller"
-  state-file: "/var/lib/cliproxyapi/xai-proxy-pool/state.json"
-  health-check-url: "https://www.gstatic.com/generate_204"
-  health-check-timeout: "5s"
-  ip-check-urls:
-    - "https://www.cloudflare.com/cdn-cgi/trace"
-    - "https://api.ipify.org"
-  provider-refresh-interval: "1h"
-  egress-refresh-interval: "1h"
-  ip-quarantine-duration: "24h"
-  node-quarantine-duration: "10m"
-  network-failure-window: "2m"
-  network-failure-threshold: 3
-  requests-per-minute-per-lane: 30
-  burst-per-lane: 3
-  queue-size-per-lane: 30
-  candidate-scan-limit: 32
-  # Optional API-owned subscription registry. When enabled, provider URLs are
-  # submitted through Management API and never returned by GET/status calls.
-  subscription-management:
-    enabled: false
-    registry-file: "/var/lib/cliproxyapi/xai-proxy-pool/subscriptions.json"
-    generated-config-file: "/var/lib/cliproxyapi/mihomo/config.yaml"
-    activation-timeout: "30s"
-    max-providers: 64
-    max-url-length: 4096
-    max-download-bytes: 8388608
-  lanes:
-    - {name: "lane-1", proxy-url: "http://mihomo:17891", selector: "xai-lane-1"}
-    - {name: "lane-2", proxy-url: "http://mihomo:17892", selector: "xai-lane-2"}
-    - {name: "lane-3", proxy-url: "http://mihomo:17893", selector: "xai-lane-3"}
-    - {name: "lane-4", proxy-url: "http://mihomo:17894", selector: "xai-lane-4"}
-    - {name: "lane-5", proxy-url: "http://mihomo:17895", selector: "xai-lane-5"}
-    - {name: "lane-6", proxy-url: "http://mihomo:17896", selector: "xai-lane-6"}
-  probe: {name: "probe", proxy-url: "http://mihomo:17899", selector: "xai-probe"}
+  service-url: "http://egress-proxy-controller:8080"
+  service-token-file: "/run/secrets/egress-proxy-api-token"
 
 # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
 force-model-prefix: false

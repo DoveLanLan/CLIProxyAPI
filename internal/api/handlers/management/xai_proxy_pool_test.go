@@ -52,7 +52,7 @@ func (e *managementXAIProxyPoolExecutor) HttpRequest(_ context.Context, _ *corea
 	}, nil
 }
 
-func (e *managementXAIProxyPoolExecutor) XAIProxyPoolStatus() helps.XAIProxyPoolStatus {
+func (e *managementXAIProxyPoolExecutor) XAIProxyPoolStatus(context.Context) helps.XAIProxyPoolStatus {
 	return e.status
 }
 
@@ -76,7 +76,7 @@ func (e *managementXAIProxyPoolExecutor) QuarantineXAIProxyIP(_ context.Context,
 	return nil
 }
 
-func (e *managementXAIProxyPoolExecutor) UnquarantineXAIProxyIP(ip string) error {
+func (e *managementXAIProxyPoolExecutor) UnquarantineXAIProxyIP(_ context.Context, ip string) error {
 	e.lastAction = "unquarantine:" + ip
 	return nil
 }

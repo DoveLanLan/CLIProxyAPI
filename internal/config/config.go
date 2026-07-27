@@ -13,7 +13,6 @@ import (
 	"os"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	sdkpluginstore "github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginstore"
@@ -26,7 +25,6 @@ const (
 	DefaultPanelGitHubRepository = "https://github.com/seakee/CPA-Manager-Plus"
 	DefaultPprofAddr             = "127.0.0.1:8316"
 	DefaultAuthDir               = "~/.cli-proxy-api"
-	DefaultXAIProxyPoolStateFile = "xai-proxy-pool-state.json"
 )
 
 // Config represents the application's configuration, loaded from a YAML file.
@@ -360,50 +358,13 @@ type RoutingConfig struct {
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
 }
 
-// XAIProxyPoolConfig configures stable xAI credential routing through a set of
-// local proxy lanes controlled by a private Mihomo API.
+// XAIProxyPoolConfig connects xAI execution to the standalone EgressProxyPool
+// control service. Pool topology, Mihomo credentials, subscriptions, and state
+// are owned by that service.
 type XAIProxyPoolConfig struct {
-	Enabled                  bool                                 `yaml:"enabled" json:"enabled"`
-	RolloutPercent           int                                  `yaml:"rollout-percent" json:"rollout-percent"`
-	ControllerURL            string                               `yaml:"controller-url" json:"controller-url"`
-	ControllerSecretFile     string                               `yaml:"controller-secret-file" json:"controller-secret-file"`
-	StateFile                string                               `yaml:"state-file" json:"state-file"`
-	HealthCheckURL           string                               `yaml:"health-check-url" json:"health-check-url"`
-	HealthCheckTimeout       string                               `yaml:"health-check-timeout" json:"health-check-timeout"`
-	IPCheckURLs              []string                             `yaml:"ip-check-urls" json:"ip-check-urls"`
-	ProviderRefreshInterval  string                               `yaml:"provider-refresh-interval" json:"provider-refresh-interval"`
-	EgressRefreshInterval    string                               `yaml:"egress-refresh-interval" json:"egress-refresh-interval"`
-	IPQuarantineDuration     string                               `yaml:"ip-quarantine-duration" json:"ip-quarantine-duration"`
-	NodeQuarantineDuration   string                               `yaml:"node-quarantine-duration" json:"node-quarantine-duration"`
-	NetworkFailureWindow     string                               `yaml:"network-failure-window" json:"network-failure-window"`
-	NetworkFailureThreshold  int                                  `yaml:"network-failure-threshold" json:"network-failure-threshold"`
-	RequestsPerMinutePerLane int                                  `yaml:"requests-per-minute-per-lane" json:"requests-per-minute-per-lane"`
-	BurstPerLane             int                                  `yaml:"burst-per-lane" json:"burst-per-lane"`
-	QueueSizePerLane         int                                  `yaml:"queue-size-per-lane" json:"queue-size-per-lane"`
-	CandidateScanLimit       int                                  `yaml:"candidate-scan-limit" json:"candidate-scan-limit"`
-	Lanes                    []XAIProxyPoolLane                   `yaml:"lanes" json:"lanes"`
-	Probe                    XAIProxyPoolLane                     `yaml:"probe" json:"probe"`
-	SubscriptionManagement   XAIProxySubscriptionManagementConfig `yaml:"subscription-management" json:"subscription-management"`
-}
-
-// XAIProxySubscriptionManagementConfig configures optional API-owned Mihomo
-// proxy-provider subscriptions. URL values live only in the private registry
-// and generated Mihomo configuration, never in the main CPA config.
-type XAIProxySubscriptionManagementConfig struct {
-	Enabled             bool   `yaml:"enabled" json:"enabled"`
-	RegistryFile        string `yaml:"registry-file" json:"registry-file"`
-	GeneratedConfigFile string `yaml:"generated-config-file" json:"generated-config-file"`
-	ActivationTimeout   string `yaml:"activation-timeout" json:"activation-timeout"`
-	MaxProviders        int    `yaml:"max-providers" json:"max-providers"`
-	MaxURLLength        int    `yaml:"max-url-length" json:"max-url-length"`
-	MaxDownloadBytes    int64  `yaml:"max-download-bytes" json:"max-download-bytes"`
-}
-
-// XAIProxyPoolLane binds a CPA proxy endpoint to a Mihomo selector group.
-type XAIProxyPoolLane struct {
-	Name     string `yaml:"name" json:"name"`
-	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
-	Selector string `yaml:"selector" json:"selector"`
+	Enabled          bool   `yaml:"enabled" json:"enabled"`
+	ServiceURL       string `yaml:"service-url" json:"service-url"`
+	ServiceTokenFile string `yaml:"service-token-file" json:"service-token-file"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
@@ -1105,114 +1066,15 @@ func (cfg *Config) SanitizeXAIKeys() {
 	cfg.XAIKey = sanitizeCodexKeyEntries(cfg.XAIKey)
 }
 
-// SanitizeXAIProxyPool normalizes xAI proxy-pool settings while preserving a
-// disabled-by-default configuration. Invalid lanes are removed so an enabled
-// pool fails closed instead of silently using a malformed endpoint.
+// SanitizeXAIProxyPool normalizes the standalone proxy-pool service settings.
+// An invalid enabled configuration remains enabled and fails closed at runtime.
 func (cfg *Config) SanitizeXAIProxyPool() {
 	if cfg == nil {
 		return
 	}
 	pool := &cfg.XAIProxyPool
-	pool.ControllerURL = normalizeHTTPURL(pool.ControllerURL)
-	pool.ControllerSecretFile = strings.TrimSpace(pool.ControllerSecretFile)
-	pool.StateFile = strings.TrimSpace(pool.StateFile)
-	if pool.StateFile == "" {
-		pool.StateFile = DefaultXAIProxyPoolStateFile
-	}
-	pool.HealthCheckURL = normalizeHTTPURL(pool.HealthCheckURL)
-	if pool.HealthCheckURL == "" {
-		pool.HealthCheckURL = "https://www.gstatic.com/generate_204"
-	}
-	pool.HealthCheckTimeout = normalizeDurationSetting(pool.HealthCheckTimeout, "5s")
-	pool.ProviderRefreshInterval = normalizeDurationSetting(pool.ProviderRefreshInterval, "1h")
-	pool.EgressRefreshInterval = normalizeDurationSetting(pool.EgressRefreshInterval, "1h")
-	pool.IPQuarantineDuration = normalizeDurationSetting(pool.IPQuarantineDuration, "24h")
-	pool.NodeQuarantineDuration = normalizeDurationSetting(pool.NodeQuarantineDuration, "10m")
-	pool.NetworkFailureWindow = normalizeDurationSetting(pool.NetworkFailureWindow, "2m")
-	pool.SubscriptionManagement.RegistryFile = strings.TrimSpace(pool.SubscriptionManagement.RegistryFile)
-	pool.SubscriptionManagement.GeneratedConfigFile = strings.TrimSpace(pool.SubscriptionManagement.GeneratedConfigFile)
-	pool.SubscriptionManagement.ActivationTimeout = normalizeDurationSetting(pool.SubscriptionManagement.ActivationTimeout, "30s")
-	if pool.SubscriptionManagement.MaxProviders <= 0 {
-		pool.SubscriptionManagement.MaxProviders = 64
-	}
-	if pool.SubscriptionManagement.MaxURLLength <= 0 {
-		pool.SubscriptionManagement.MaxURLLength = 4096
-	}
-	if pool.SubscriptionManagement.MaxDownloadBytes <= 0 {
-		pool.SubscriptionManagement.MaxDownloadBytes = 8 << 20
-	}
-
-	if pool.RolloutPercent <= 0 || pool.RolloutPercent > 100 {
-		pool.RolloutPercent = 100
-	}
-	if pool.NetworkFailureThreshold <= 0 {
-		pool.NetworkFailureThreshold = 3
-	}
-	if pool.RequestsPerMinutePerLane <= 0 {
-		pool.RequestsPerMinutePerLane = 30
-	}
-	if pool.BurstPerLane <= 0 {
-		pool.BurstPerLane = 3
-	}
-	if pool.QueueSizePerLane <= 0 {
-		pool.QueueSizePerLane = 30
-	}
-	if pool.CandidateScanLimit <= 0 {
-		pool.CandidateScanLimit = 32
-	}
-
-	pool.IPCheckURLs = normalizeHTTPURLs(pool.IPCheckURLs)
-	if len(pool.IPCheckURLs) == 0 {
-		pool.IPCheckURLs = []string{
-			"https://www.cloudflare.com/cdn-cgi/trace",
-			"https://api.ipify.org",
-		}
-	}
-
-	seen := make(map[string]struct{}, len(pool.Lanes))
-	lanes := make([]XAIProxyPoolLane, 0, len(pool.Lanes))
-	for i := range pool.Lanes {
-		lane, ok := normalizeXAIProxyPoolLane(pool.Lanes[i])
-		if !ok {
-			continue
-		}
-		key := strings.ToLower(lane.Name)
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		lanes = append(lanes, lane)
-	}
-	pool.Lanes = lanes
-	if probe, ok := normalizeXAIProxyPoolLane(pool.Probe); ok {
-		pool.Probe = probe
-	} else {
-		pool.Probe = XAIProxyPoolLane{}
-	}
-}
-
-func normalizeXAIProxyPoolLane(lane XAIProxyPoolLane) (XAIProxyPoolLane, bool) {
-	lane.Name = strings.TrimSpace(lane.Name)
-	lane.ProxyURL = normalizeProxyEndpoint(lane.ProxyURL)
-	lane.Selector = strings.TrimSpace(lane.Selector)
-	if lane.Name == "" || lane.ProxyURL == "" || lane.Selector == "" {
-		return XAIProxyPoolLane{}, false
-	}
-	return lane, true
-}
-
-func normalizeProxyEndpoint(raw string) string {
-	raw = strings.TrimSpace(raw)
-	parsed, errParse := url.Parse(raw)
-	if errParse != nil || parsed.Host == "" {
-		return ""
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "http", "https", "socks5", "socks5h":
-		return parsed.String()
-	default:
-		return ""
-	}
+	pool.ServiceURL = normalizeHTTPURL(pool.ServiceURL)
+	pool.ServiceTokenFile = strings.TrimSpace(pool.ServiceTokenFile)
 }
 
 func normalizeHTTPURL(raw string) string {
@@ -1227,37 +1089,6 @@ func normalizeHTTPURL(raw string) string {
 	default:
 		return ""
 	}
-}
-
-func normalizeHTTPURLs(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = normalizeHTTPURL(value)
-		if value == "" {
-			continue
-		}
-		if _, exists := seen[value]; exists {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
-}
-
-func normalizeDurationSetting(value string, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	if _, errParse := time.ParseDuration(value); errParse != nil {
-		return fallback
-	}
-	return value
 }
 
 func sanitizeCodexKeyEntries(entries []CodexKey) []CodexKey {

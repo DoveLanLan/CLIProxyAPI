@@ -1,86 +1,71 @@
-# Quality Gate: xAI proxy pool and subscription Management API
+# Quality gate: standalone EgressProxyPool extraction
 
 Date: 2026-07-27
-Task: `.osc/tasks/07-27-xai-dedicated-proxy-pool`
-Status: PASS with pre-existing optional-vet findings
+Task: `.osc/tasks/07-27-extract-egress-proxy-pool`
+Status: PASS with one pre-existing unrelated race-test finding
 
 ## Changed scope
 
-- Additive xAI-only proxy-pool config and executor routing.
-- Mihomo controller, lane/quarantine runtime, persistence, and management API.
-- API-owned multi-subscription registry, generated configuration, hot-reload
-  transaction, startup recovery, and two-step delete.
-- Optional production Compose/deploy assets and operator documentation.
+- New sibling Git project: `/root/Projects/Go/src/EgressProxyPool`.
+- Standalone pool/controller/subscription runtime and authenticated `/v1` API.
+- CLIProxyAPI remote pool client and simplified configuration.
+- CLIProxyAPI Management API compatibility facade and deployment integration.
 - No changes under `internal/translator/**`.
 
 ## Required and focused gates
 
-| Command | Result |
+| Project / command | Result |
 |---|---|
-| `gofmt` plus `gofmt -l` on all changed Go files | PASS |
-| `go test ./internal/config ./internal/runtime/executor/helps ./internal/runtime/executor ./internal/api/handlers/management ./internal/api` | PASS |
-| `go test -race ./internal/runtime/executor/helps ./internal/api/handlers/management` | PASS |
-| `CLIPROXY_MIHOMO_INTEGRATION=1 go test -run TestXAIProxyGeneratedMihomoConfigPinnedImage ./internal/runtime/executor/helps` | PASS |
-| `./osc gate --cmd "go test ./..."` | PASS |
-| `go build -o test-output ./cmd/server && rm test-output` | PASS |
-| `git diff --check` and trailing-whitespace scan of changed/untracked files | PASS |
+| EgressProxyPool `gofmt -w .` | PASS |
+| EgressProxyPool `go test ./...` | PASS |
+| EgressProxyPool `go test -race ./internal/api ./internal/pool` | PASS |
+| EgressProxyPool `go vet ./...` | PASS |
+| EgressProxyPool `go build -o test-output ./cmd/server && rm test-output` | PASS |
+| EgressProxyPool Docker image build | PASS |
+| CLIProxyAPI `gofmt -w .` | PASS |
+| CLIProxyAPI `go test ./...` | PASS |
+| CLIProxyAPI focused xAI/helper/management race tests | PASS |
+| CLIProxyAPI `go vet` on changed packages | PASS |
+| CLIProxyAPI `go build -o test-output ./cmd/server && rm test-output` | PASS |
+| `git diff --check` and `bash -n deploy/scripts/remote-deploy.sh` | PASS |
 
-The runtime used Go `1.26.0` on Darwin arm64.
+The Docker build needed the host HTTPS proxy for dependency download after one
+direct `proxy.golang.org` timeout; the resulting image compiled successfully.
 
-## Deployment asset gates
+## Deployment gates
 
 | Check | Result |
 |---|---|
-| `bash -n deploy/scripts/remote-deploy.sh` | PASS |
-| Base + xAI overlay `docker compose ... config --quiet` | PASS |
-| Rendered Compose assertions: no Mihomo host ports/host network/privileged mode, `cap_drop: ALL`, controller secret read-only, shared config writable | PASS |
-| Pinned Mihomo `-t` against `deploy/mihomo/config.example.yaml` | PASS |
-| Pinned Mihomo `-t` against API-generated YAML | PASS |
-| Local loopback-only Mihomo smoke: `PUT /configs?force=true` payload reload | PASS |
+| EgressProxyPool `docker compose config` | PASS |
+| CLIProxyAPI base + standalone-pool overlay Compose render | PASS |
+| No controller/Mihomo host port publication | PASS |
+| No host network, privileged mode, TUN, or `cap_add` | PASS |
+| Both containers use `cap_drop: ALL` and `no-new-privileges` | PASS |
+| CLIProxyAPI mounts only the standalone API token | PASS |
 
-Pinned image:
-`docker.io/metacubex/mihomo:v1.19.28@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312`
-
-The smoke container was removed after validation. No production host, service,
-configuration, or container was accessed or changed.
+The expected existing CLIProxyAPI Tailscale management host port remains in the
+combined render; the pool overlay adds no published port.
 
 ## Security and compatibility review
 
-- PASS: subscription URL is accepted only by POST/PUT input and omitted from all
-  response/status/error types.
-- PASS: registry/generated files use atomic mode-`0600` writes; registry reads
-  reject symlinks, unsafe permissions, oversized files, and invalid entries.
-- PASS: provider names, HTTPS/FQDN/port URL shape, body size, provider count, URL
-  length, and download size are bounded; userinfo, fragments, local names,
-  non-public literal IPs, and IPv6 zones are rejected.
-- PASS: candidate reload/refresh/verification/reconcile/persistence failures
-  restore the prior runtime; startup reconstructs generated config from registry.
-- PASS: mutations are serialized and protected by strict revision `If-Match`.
-- PASS: established xAI streams receive no new read deadline and are not replayed
-  or intentionally closed by subscription changes.
-- PASS: explicit auth proxy remains higher priority and enrolled pool traffic
-  never chains through global `proxy-url`.
-- PASS: changed-file secret-pattern scan found no private key or common live-token
-  pattern; examples use reserved placeholder domains/values.
-- PASS: `git status --short internal/translator` is empty.
+- PASS: constant-time bearer-token comparison and bounded strict JSON bodies.
+- PASS: raw auth IDs are never sent; route keys are HMAC-SHA256 digests.
+- PASS: client transport bypasses environment/global proxies for private control
+  traffic and never logs tokens or request bodies.
+- PASS: subscription URLs remain write-only and errors are redacted.
+- PASS: registry/generated files retain atomic mode-`0600` behavior.
+- PASS: probe leases are random, single-use, expiring, and released on shutdown.
+- PASS: established xAI streams get no new read deadline and are not replayed
+  after downstream payload.
+- PASS: explicit auth proxy precedence and request-scoped managed errors remain.
+- PASS: protected `internal/translator/**` is unchanged.
+- PASS: no production host, configuration, subscription, or service was changed.
 
-## Optional vet gate
+## Pre-existing race finding
 
-`go vet ./...` reports six pre-existing findings and no new finding in the xAI
-subscription-management files:
-
-- `internal/logging/request_logger.go`: non-standard `WriteTo` signature.
-- `sdk/api/handlers/handlers.go`: pre-existing unreachable statement at line
-  1438 (outside this task's changed hunk).
-- `internal/pluginhost/host_callbacks.go`: two cancel-path findings.
-- `internal/pluginhost/host_model_stream_callbacks.go`: two cancel-path findings.
-
-These findings are outside the task scope and remain as baseline technical debt.
-
-## PR-ready checklist
-
-- [x] Proposal, spec, tasks, summary, regression, and rollback artifacts updated.
-- [x] Focused, race, integration, full-test, and required-build gates pass.
-- [x] Deployment assets render and validate with the pinned Mihomo image.
-- [x] Secret/redaction, rollback, compatibility, and protected-path reviews pass.
-- [x] Production deployment remains separately authorized and was not performed.
+Running race mode for the entire `internal/runtime/executor` package reports an
+existing Antigravity credits test-cleanup race between
+`resetAntigravityCreditsRetryState` and background credit-refresh goroutines in
+`antigravity_executor_credits_test.go` / `antigravity_executor.go`. Those files
+are outside this change. The xAI proxy-pool executor tests, helper client tests,
+and management tests pass under race mode.

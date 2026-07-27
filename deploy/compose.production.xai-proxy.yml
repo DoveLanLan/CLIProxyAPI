@@ -1,36 +1,12 @@
 services:
   cli-proxy-api:
-    depends_on:
-      - mihomo
     volumes:
-      - ./secrets/xai-proxy/controller-secret:/run/secrets/mihomo-controller:ro
-      - ./data/xai-proxy-pool:/var/lib/cliproxyapi/xai-proxy-pool
-      - ./data/mihomo:/var/lib/cliproxyapi/mihomo
-
-  mihomo:
-    image: ${MIHOMO_IMAGE:-docker.io/metacubex/mihomo:v1.19.28@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312}
-    container_name: cli-proxy-mihomo
-    restart: unless-stopped
-    command:
-      - -d
-      - /root/.config/mihomo
-    expose:
-      - "9090"
-      - "17891"
-      - "17892"
-      - "17893"
-      - "17894"
-      - "17895"
-      - "17896"
-      - "17899"
-    volumes:
-      - ./data/mihomo:/root/.config/mihomo
+      - ${EGRESS_PROXY_API_TOKEN:-/opt/egress-proxy-pool/secrets/api-token}:/run/secrets/egress-proxy-api-token:ro
     networks:
       - proxy
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 128
-    mem_limit: 384m
-    cpus: 1.0
+      - egress-proxy
+
+networks:
+  egress-proxy:
+    external: true
+    name: ${EGRESS_PROXY_NETWORK:-egress-proxy}

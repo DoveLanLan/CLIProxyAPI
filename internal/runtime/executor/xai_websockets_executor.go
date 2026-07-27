@@ -1413,7 +1413,27 @@ func CloseXAIWebsocketSessionsForAuthID(authID string, reason string) {
 type XAIAutoExecutor struct {
 	httpExec  *XAIExecutor
 	wsExec    *XAIWebsocketsExecutor
-	proxyPool *helps.XAIProxyPool
+	proxyPool xaiProxyPoolClient
+}
+
+type xaiProxyPoolClient interface {
+	Route(context.Context, string) (helps.XAIProxyRoute, bool, error)
+	AcquireProbe(context.Context, helps.XAIProxyRoute) (helps.XAIProxyProbeLease, error)
+	HandlePreconnectFailure(context.Context, helps.XAIProxyRoute) (helps.XAIProxyRoute, bool, error)
+	ObserveMidResponseFailure(context.Context, helps.XAIProxyRoute)
+	RecordExact402(context.Context)
+	Status(context.Context) helps.XAIProxyPoolStatus
+	RefreshProviders(context.Context) error
+	RotateLane(context.Context, string) error
+	CheckLane(context.Context, string) (bool, error)
+	QuarantineIP(context.Context, string) error
+	UnquarantineIP(context.Context, string) error
+	XAIProxySubscriptions(context.Context) helps.XAIProxySubscriptionList
+	CreateXAIProxySubscription(context.Context, uint64, helps.XAIProxySubscriptionCreate) (helps.XAIProxySubscriptionList, error)
+	UpdateXAIProxySubscription(context.Context, uint64, string, helps.XAIProxySubscriptionUpdate) (helps.XAIProxySubscriptionList, error)
+	DeleteXAIProxySubscription(context.Context, uint64, string) (helps.XAIProxySubscriptionList, error)
+	CheckXAIProxySubscription(context.Context, string) (helps.XAIProxySubscriptionStatus, error)
+	Close()
 }
 
 func NewXAIAutoExecutor(cfg *config.Config) *XAIAutoExecutor {
@@ -1501,7 +1521,7 @@ func (e *XAIAutoExecutor) handleXAIProxyHTTPResponse(ctx context.Context, auth *
 	if errClose := resp.Body.Close(); errClose != nil {
 		return nil, fmt.Errorf("xai proxy pool: close blocked response: %w", errClose)
 	}
-	e.proxyPool.RecordExact402()
+	e.proxyPool.RecordExact402(ctx)
 	lease, errProbe := e.proxyPool.AcquireProbe(ctx, route)
 	if errProbe != nil {
 		return nil, errProbe
@@ -1511,7 +1531,7 @@ func (e *XAIAutoExecutor) handleXAIProxyHTTPResponse(ctx context.Context, auth *
 		lease.Unavailable()
 		return nil, errRetryReq
 	}
-	alternate, errAlternate := e.httpExec.HttpRequest(ctx, cloneXAIAuthWithRoute(auth, lease.Route), retryReq)
+	alternate, errAlternate := e.httpExec.HttpRequest(ctx, cloneXAIAuthWithRoute(auth, lease.AlternateRoute()), retryReq)
 	if errAlternate != nil {
 		lease.Unavailable()
 		return nil, &helps.XAIProxyPoolError{Message: "xai proxy pool could not verify the suspected blocked egress", Retry: 30 * time.Second}
@@ -1594,11 +1614,11 @@ func (e *XAIAutoExecutor) CloseExecutionSession(sessionID string) {
 	}
 }
 
-func (e *XAIAutoExecutor) XAIProxyPoolStatus() helps.XAIProxyPoolStatus {
+func (e *XAIAutoExecutor) XAIProxyPoolStatus(ctx context.Context) helps.XAIProxyPoolStatus {
 	if e == nil || e.proxyPool == nil {
 		return helps.XAIProxyPoolStatus{}
 	}
-	return e.proxyPool.Status()
+	return e.proxyPool.Status(ctx)
 }
 
 func (e *XAIAutoExecutor) RefreshXAIProxyProviders(ctx context.Context) error {
@@ -1629,11 +1649,11 @@ func (e *XAIAutoExecutor) QuarantineXAIProxyIP(ctx context.Context, ip string) e
 	return e.proxyPool.QuarantineIP(ctx, ip)
 }
 
-func (e *XAIAutoExecutor) UnquarantineXAIProxyIP(ip string) error {
+func (e *XAIAutoExecutor) UnquarantineXAIProxyIP(ctx context.Context, ip string) error {
 	if e == nil || e.proxyPool == nil {
 		return &helps.XAIProxyPoolError{Message: "xai proxy pool is unavailable", Retry: 30 * time.Second}
 	}
-	return e.proxyPool.UnquarantineIP(ip)
+	return e.proxyPool.UnquarantineIP(ctx, ip)
 }
 
 func (e *XAIAutoExecutor) XAIProxySubscriptions(ctx context.Context) helps.XAIProxySubscriptionList {
