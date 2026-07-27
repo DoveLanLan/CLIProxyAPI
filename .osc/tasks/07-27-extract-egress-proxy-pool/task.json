@@ -1,0 +1,14 @@
+{
+  "name": "Extract standalone egress proxy pool",
+  "type": "refactor",
+  "branch": "feat/xai-proxy-pool-subscriptions",
+  "priority": "P1",
+  "description": "Move Mihomo subscription, lane, health, quarantine, and persistence ownership into a standalone EgressProxyPool project and integrate CLIProxyAPI through a private control API.",
+  "depends_on": [],
+  "status": "done",
+  "completed_at": "2026-07-27T13:47:50Z",
+  "current_phase": 4,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed"
+}

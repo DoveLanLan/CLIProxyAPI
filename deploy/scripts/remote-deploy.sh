@@ -27,6 +27,23 @@ if [[ "${ENABLE_SPLIT_PROXY:-false}" == "true" ]]; then
   COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.split-proxy.yml")
 fi
 
+if [[ "${ENABLE_XAI_PROXY_POOL:-false}" == "true" ]]; then
+  COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.xai-proxy.yml")
+  EGRESS_PROXY_NETWORK="${EGRESS_PROXY_NETWORK:-egress-proxy}"
+  EGRESS_PROXY_API_TOKEN="${EGRESS_PROXY_API_TOKEN:-/opt/egress-proxy-pool/secrets/api-token}"
+  if [[ ! -s "$EGRESS_PROXY_API_TOKEN" ]]; then
+    echo "error: missing EgressProxyPool API token file: $EGRESS_PROXY_API_TOKEN" >&2
+    exit 1
+  fi
+  if ! docker network inspect "$EGRESS_PROXY_NETWORK" >/dev/null 2>&1; then
+    echo "error: missing EgressProxyPool Docker network: $EGRESS_PROXY_NETWORK" >&2
+    echo "Start the standalone EgressProxyPool Compose project before enabling this overlay." >&2
+    exit 1
+  fi
+  chmod 600 "$EGRESS_PROXY_API_TOKEN"
+  export EGRESS_PROXY_NETWORK EGRESS_PROXY_API_TOKEN
+fi
+
 if [[ ! -f "$ROOT_DIR/data/config.yaml" ]]; then
   echo "error: missing $ROOT_DIR/data/config.yaml" >&2
   echo "Place your runtime config on the server before deploying." >&2

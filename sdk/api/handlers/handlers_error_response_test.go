@@ -14,6 +14,14 @@ import (
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
 
+type managedRetryHeaderError struct{}
+
+func (managedRetryHeaderError) Error() string { return "local backpressure" }
+
+func (managedRetryHeaderError) ManagedHeaders() http.Header {
+	return http.Header{"Retry-After": {"7"}, "X-Upstream": {"blocked"}}
+}
+
 func TestWriteErrorResponse_AddonHeadersDisabledByDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -38,6 +46,26 @@ func TestWriteErrorResponse_AddonHeadersDisabledByDefault(t *testing.T) {
 	}
 	if got := recorder.Header().Get("X-Request-Id"); got != "" {
 		t.Fatalf("X-Request-Id should be empty when passthrough is disabled, got %q", got)
+	}
+}
+
+func TestWriteErrorResponse_ManagedRetryAfterBypassesPassthroughSetting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler := NewBaseAPIHandlers(nil, nil)
+	handler.WriteErrorResponse(c, &interfaces.ErrorMessage{
+		StatusCode: http.StatusServiceUnavailable,
+		Error:      managedRetryHeaderError{},
+	})
+
+	if got := recorder.Header().Get("Retry-After"); got != "7" {
+		t.Fatalf("Retry-After = %q, want 7", got)
+	}
+	if got := recorder.Header().Get("X-Upstream"); got != "" {
+		t.Fatalf("unmanaged header leaked: %q", got)
 	}
 }
 

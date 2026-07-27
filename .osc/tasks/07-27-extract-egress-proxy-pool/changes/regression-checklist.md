@@ -1,0 +1,23 @@
+# Regression checklist: standalone EgressProxyPool
+
+- [x] Missing/disabled pool preserves legacy xAI behavior.
+- [x] Invalid enabled remote configuration fails closed.
+- [x] Explicit auth `proxy_url` bypasses the remote pool.
+- [x] Raw auth IDs are replaced with stable HMAC-SHA256 route keys.
+- [x] Remote route responses carry private lane URLs only over authenticated API.
+- [x] Exact pre-response spending-limit 402 acquires one probe lease.
+- [x] Alternate success confirms the IP block and promotes the route.
+- [x] Repeated exact 402 remains a credential failure.
+- [x] Preconnect network retry and no midstream replay remain covered.
+- [x] Probe leases are single-use and expire automatically.
+- [x] Outstanding probe leases release during controller shutdown.
+- [x] Subscription URLs remain write-only and absent from errors/status.
+- [x] Subscription `If-Match`/`ETag` revision behavior crosses the service boundary.
+- [x] Existing CLIProxyAPI Management API paths remain registered and tested.
+- [x] Standalone startup recovers after controller-before-Mihomo initialization.
+- [x] Compose publishes no new host ports and adds no elevated capabilities.
+- [x] CLIProxyAPI no longer mounts Mihomo config/state/controller secrets.
+- [x] `internal/translator/**` remains unchanged.
+- [x] Both projects' full tests and required server builds pass.
+- [x] Standalone and changed xAI-focused race tests pass.
+- [x] Standalone Docker image builds successfully.

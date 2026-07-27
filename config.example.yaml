@@ -106,6 +106,15 @@ redis-usage-queue-retention-seconds: 60
 # Per-entry proxy-url also supports "direct" or "none" to bypass both the global proxy-url and environment proxies explicitly.
 proxy-url: ""
 
+# Optional xAI-only proxy pool. Disabled by default. The standalone
+# EgressProxyPool service owns subscriptions, Mihomo, lanes, health, and state.
+# CLIProxyAPI sends only an HMAC digest of the auth ID and keeps exact-402 retry
+# decisions local. Explicit auth proxy_url values still bypass the pool.
+xai-proxy-pool:
+  enabled: false
+  service-url: "http://egress-proxy-controller:8080"
+  service-token-file: "/run/secrets/egress-proxy-api-token"
+
 # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
 force-model-prefix: false
 

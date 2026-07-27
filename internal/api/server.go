@@ -63,6 +63,7 @@ var corsExposedResponseHeaders = []string{
 	"X-CPA-HOME-BUILD-DATE",
 	"X-SERVER-VERSION",
 	"X-SERVER-BUILD-DATE",
+	"ETag",
 }
 
 var corsExposedResponseHeadersJoined = strings.Join(corsExposedResponseHeaders, ", ")
@@ -852,6 +853,17 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/proxy-url", s.mgmt.DeleteProxyURL)
 
 		mgmt.POST("/api-call", s.mgmt.APICall)
+		mgmt.GET("/xai-proxy-pool/status", s.mgmt.GetXAIProxyPoolStatus)
+		mgmt.POST("/xai-proxy-pool/providers/refresh", s.mgmt.RefreshXAIProxyProviders)
+		mgmt.POST("/xai-proxy-pool/lanes/:lane/rotate", s.mgmt.RotateXAIProxyLane)
+		mgmt.POST("/xai-proxy-pool/lanes/:lane/check", s.mgmt.CheckXAIProxyLane)
+		mgmt.POST("/xai-proxy-pool/quarantine", s.mgmt.QuarantineXAIProxyIP)
+		mgmt.DELETE("/xai-proxy-pool/quarantine/:ip", s.mgmt.UnquarantineXAIProxyIP)
+		mgmt.GET("/xai-proxy-pool/subscriptions", s.mgmt.GetXAIProxySubscriptions)
+		mgmt.POST("/xai-proxy-pool/subscriptions", s.mgmt.CreateXAIProxySubscription)
+		mgmt.PUT("/xai-proxy-pool/subscriptions/:name", s.mgmt.UpdateXAIProxySubscription)
+		mgmt.DELETE("/xai-proxy-pool/subscriptions/:name", s.mgmt.DeleteXAIProxySubscription)
+		mgmt.POST("/xai-proxy-pool/subscriptions/:name/check", s.mgmt.CheckXAIProxySubscription)
 
 		mgmt.GET("/quota-exceeded/switch-project", s.mgmt.GetSwitchProject)
 		mgmt.PUT("/quota-exceeded/switch-project", s.mgmt.PutSwitchProject)

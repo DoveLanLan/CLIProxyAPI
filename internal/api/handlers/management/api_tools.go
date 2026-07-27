@@ -172,15 +172,14 @@ func (h *Handler) APICall(c *gin.Context) {
 		req.Host = hostOverride
 	}
 
-	httpClient := &http.Client{
-		Timeout: defaultAPICallTimeout,
-	}
-	httpClient.Transport = h.apiCallTransport(auth)
-
-	resp, errDo := httpClient.Do(req)
+	callCtx, cancelCall := context.WithTimeout(c.Request.Context(), defaultAPICallTimeout)
+	defer cancelCall()
+	req = req.WithContext(callCtx)
+	resp, errDo := h.executeAPIRequest(callCtx, auth, req)
 	if errDo != nil {
 		log.WithError(errDo).Debug("management APICall request failed")
-		c.JSON(http.StatusBadGateway, gin.H{"error": "request failed"})
+		status := xaiProxyPoolHTTPStatus(errDo, http.StatusBadGateway)
+		c.JSON(status, gin.H{"error": errDo.Error()})
 		return
 	}
 	defer func() {
@@ -200,6 +199,19 @@ func (h *Handler) APICall(c *gin.Context) {
 		Header:     resp.Header,
 		Body:       string(respBody),
 	})
+}
+
+func (h *Handler) executeAPIRequest(ctx context.Context, auth *coreauth.Auth, req *http.Request) (*http.Response, error) {
+	if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Provider), "xai") && h != nil && h.authManager != nil {
+		if executor, okExecutor := h.authManager.Executor("xai"); okExecutor && executor != nil {
+			return executor.HttpRequest(ctx, auth, req)
+		}
+	}
+	httpClient := &http.Client{
+		Timeout:   defaultAPICallTimeout,
+		Transport: h.apiCallTransport(auth),
+	}
+	return httpClient.Do(req)
 }
 
 func firstNonEmptyString(values ...*string) string {

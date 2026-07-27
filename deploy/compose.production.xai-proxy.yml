@@ -1,0 +1,12 @@
+services:
+  cli-proxy-api:
+    volumes:
+      - ${EGRESS_PROXY_API_TOKEN:-/opt/egress-proxy-pool/secrets/api-token}:/run/secrets/egress-proxy-api-token:ro
+    networks:
+      - proxy
+      - egress-proxy
+
+networks:
+  egress-proxy:
+    external: true
+    name: ${EGRESS_PROXY_NETWORK:-egress-proxy}

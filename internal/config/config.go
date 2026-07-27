@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"syscall"
@@ -127,6 +128,9 @@ type Config struct {
 
 	// XAIKey defines xAI API key configurations using the same structure as Codex API keys.
 	XAIKey []XAIKey `yaml:"xai-api-key" json:"xai-api-key"`
+
+	// XAIProxyPool configures an optional xAI-only proxy lane pool.
+	XAIProxyPool XAIProxyPoolConfig `yaml:"xai-proxy-pool" json:"xai-proxy-pool"`
 
 	// Codex configures provider-wide Codex request behavior.
 	Codex CodexConfig `yaml:"codex" json:"codex"`
@@ -352,6 +356,15 @@ type RoutingConfig struct {
 	// SessionAffinityTTL specifies how long session-to-auth bindings are retained.
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
+}
+
+// XAIProxyPoolConfig connects xAI execution to the standalone EgressProxyPool
+// control service. Pool topology, Mihomo credentials, subscriptions, and state
+// are owned by that service.
+type XAIProxyPoolConfig struct {
+	Enabled          bool   `yaml:"enabled" json:"enabled"`
+	ServiceURL       string `yaml:"service-url" json:"service-url"`
+	ServiceTokenFile string `yaml:"service-token-file" json:"service-token-file"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
@@ -835,6 +848,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Sanitize xAI keys: drop entries without base-url
 	cfg.SanitizeXAIKeys()
 
+	// Sanitize the optional xAI-only proxy pool.
+	cfg.SanitizeXAIProxyPool()
+
 	// Sanitize Codex header defaults.
 	cfg.SanitizeCodexHeaderDefaults()
 
@@ -1048,6 +1064,31 @@ func (cfg *Config) SanitizeXAIKeys() {
 		return
 	}
 	cfg.XAIKey = sanitizeCodexKeyEntries(cfg.XAIKey)
+}
+
+// SanitizeXAIProxyPool normalizes the standalone proxy-pool service settings.
+// An invalid enabled configuration remains enabled and fails closed at runtime.
+func (cfg *Config) SanitizeXAIProxyPool() {
+	if cfg == nil {
+		return
+	}
+	pool := &cfg.XAIProxyPool
+	pool.ServiceURL = normalizeHTTPURL(pool.ServiceURL)
+	pool.ServiceTokenFile = strings.TrimSpace(pool.ServiceTokenFile)
+}
+
+func normalizeHTTPURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, errParse := url.Parse(raw)
+	if errParse != nil || parsed.Host == "" {
+		return ""
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return strings.TrimRight(parsed.String(), "/")
+	default:
+		return ""
+	}
 }
 
 func sanitizeCodexKeyEntries(entries []CodexKey) []CodexKey {

@@ -5,6 +5,7 @@ This directory contains the production deployment artifacts for the forked VPS d
 Additional guide:
 
 - Chinese split-proxy setup: [SPLIT_PROXY_SETUP_CN.md](/root/Projects/Go/src/CLIProxyAPI/deploy/SPLIT_PROXY_SETUP_CN.md)
+- Chinese xAI proxy-pool setup: [XAI_PROXY_POOL_SETUP_CN.md](XAI_PROXY_POOL_SETUP_CN.md)
 
 ## Topology
 
@@ -23,6 +24,7 @@ Recommended root on the VPS:
   .env
   compose.production.yml
   compose.production.split-proxy.yml
+  compose.production.xai-proxy.yml
   data/config.yaml
   data/auths/
   data/logs/
@@ -50,12 +52,25 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
+   - `ENABLE_XAI_PROXY_POOL=true` only after starting the standalone EgressProxyPool project
+   - `EGRESS_PROXY_NETWORK` and `EGRESS_PROXY_API_TOKEN` to its shared network and token path
    - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` only when split-proxy is enabled
 3. Create `data/config.yaml` on the VPS.
 4. Create `data/auths/` and place any existing auth files there if needed.
 5. Ensure `data/logs/`, `data/plugins/`, and `data/grok-inspection/` exist and are writable.
    When split-proxy is enabled, `data/logs/split-proxy/` will be used for Squid logs.
 6. Ensure the shared gateway stack exists and mounts the certificate directory expected by `api.heweili.top.conf`.
+
+## xAI Proxy Pool Option
+
+The optional `compose.production.xai-proxy.yml` overlay attaches CLIProxyAPI to
+the private network created by the standalone `EgressProxyPool` project and
+mounts only that service's API token. Mihomo, subscriptions, provider caches,
+lane state, and controller credentials are no longer owned by this deployment.
+The overlay publishes no additional host ports and does not change system
+routing. See
+[XAI_PROXY_POOL_SETUP_CN.md](XAI_PROXY_POOL_SETUP_CN.md)
+for staged rollout and rollback steps.
 
 ## Dynamic Plugins
 

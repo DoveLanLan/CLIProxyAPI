@@ -1,310 +1,71 @@
-# Quality Gate: Sync Upstream v7.2.48 Preserving Deploy and CPA-Manager
+# Quality gate: standalone EgressProxyPool extraction
 
-- Date: 2026-07-02
-- Scope: Upstream `router-for-me/CLIProxyAPI` sync to `v7.2.48` (`956ce7cf`) while preserving local deploy/ops and CPA-Manager-Plus defaults.
-
-## Assumptions
-
-- The sync stays local on `task/sync-upstream-v7.2.48`; push and production deployment are separate.
-- Protected deployment paths are preserved except intentional `deploy/README.md` panel-source documentation update.
-- Upstream removal of Amp and Gemini CLI code paths is accepted.
-
-## Detected Gates
-
-- Gate Name: Server compile
-  - Confidence: High
-  - Evidence: `AGENTS.md`, PR build convention
-- Gate Name: Full Go tests
-  - Confidence: High
-  - Evidence: `AGENTS.md`, broad protocol/runtime/auth/management changes
-- Gate Name: Conflict/format check
-  - Confidence: High
-  - Evidence: large merge with prior conflicts
-- Gate Name: Local behavior regression checks
-  - Confidence: High
-  - Evidence: fork-specific patches re-ported during sync
-
-## Executed Gates
-
-1. Conflict check
-   - Command: `git diff --name-only --diff-filter=U`
-   - Result: Passed; `0` unresolved files.
-2. Conflict marker scan
-   - Command: grep scan over Go/YAML/Markdown files for `<<<<<<<`, `=======`, `>>>>>>>`
-   - Result: Passed; no markers found outside ignored artifacts.
-3. Formatting
-   - Command: `gofmt` on changed Go files
-   - Result: Passed.
-4. Whitespace check
-   - Command: `git diff --cached --check`
-   - Result: Passed.
-5. Server build
-   - Command: `go build -o test-output ./cmd/server && rm test-output`
-   - Result: Passed.
-6. Full tests
-   - Command: `go test ./...`
-   - Result: Passed.
-7. Focused local behavior checks
-   - Commands included:
-     - `go test ./sdk/cliproxy/auth -run 'TestManager_CodexInvalidatedOAuthTokenDisablesAndFallsBackWithMaxRetryOne|TestManager_CodexGeneric401UsesTemporaryCooldownAndMaxRetryLimit' -v`
-     - `go test ./sdk/cliproxy -run TestOpenAICompat -v`
-     - `go test ./internal/runtime/executor/helps -run 'TestParseOpenAIStreamUsage' -v`
-     - `go test ./internal/runtime/executor -run 'Test.*System.*String|TestCheckSystemInstructionsWithMode' -v`
-     - `go test ./sdk/api/handlers/openai -run 'TestAppendWebsocketEvent' -v`
-     - `go test ./internal/registry -run 'TestCodex|TestValidate|TestStatic|TestGet|TestAntigravity|TestWithXAI' -v`
-     - `go test ./internal/api/handlers/management -run 'Test.*Usage|Test.*AuthFiles|Test.*Config|Test.*Handler' -v`
-     - `go test ./internal/redisqueue -v`
-   - Result: Passed.
-8. CPA-Manager-Plus default check
-   - Command: `git grep -n 'seakee/CPA-Manager-Plus' -- internal/config/config.go internal/managementasset/updater.go config.example.yaml README.md README_CN.md README_JA.md deploy/README.md`
-   - Result: Passed.
-
-## Final Self-Review
-
-- Security & secrets: No secrets added; `config.yaml` remains ignored; management panel source points to public `seakee/CPA-Manager-Plus` release assets.
-- Edge cases & error handling: Codex invalidated OAuth token handling disables bad auth and persists disabled reason; generic 401 remains cooldown-limited.
-- Backward compatibility / migrations: No database/storage migration introduced; upstream config additions should keep old configs valid.
-- API/contract compatibility: Upstream API additions accepted; local protected deployment paths preserved.
-- Observability: WebSocket body log growth remains capped; upstream logging/timeline changes retained.
-- Config/env changes: `config.example.yaml` now documents upstream plugin/safemode/image/video/cooldown fields and local CPA-Manager-Plus panel source.
-- Rollback plan: revert sync commit/series or reset to `307f5ff8` if not pushed; see rollback notes.
-
-## PR-ready checklist
-
-- [x] Change-workflow artifacts updated
-- [x] No unresolved conflicts
-- [x] `git diff --cached --check`
-- [x] `go build -o test-output ./cmd/server && rm test-output`
-- [x] `go test ./...`
-- [x] Focused local behavior tests
-- [x] CPA-Manager-Plus defaults verified
-
----
-
-# Quality Gate Addendum: Remove Legacy CPA-Manager from Production Deploy
-
-- Date: 2026-07-02
-- Scope: Production deploy hotfix for the old standalone CPA-Manager service and port conflict on `100.67.99.9:18318`.
-
-## Assumptions
-
-- Production now uses CPA Manager Plus through the CLIProxyAPI management panel.
-- No Go runtime behavior changed in this hotfix.
-- The existing deploy script keeps using `docker compose up -d --remove-orphans`.
-
-## Suspected Change Scope
-
-- `deploy/compose.production.yml`
-- `deploy/.env.example`
-- `deploy/README.md`
-- `.github/workflows/update-cpa-manager-image.yml`
-- `.osc/spec/project-spec.md`
-- `.osc/tasks/07-01-sync-upstream-v7.2.48/changes/*`
-
-## Detected Gates
-
-- Gate Name: Production compose render
-  - Confidence: High
-  - Evidence: `.github/workflows/deploy-production.yml` step `Deploy production stack`; `deploy/scripts/remote-deploy.sh` runs `docker compose pull` and `docker compose up -d --remove-orphans`.
-- Gate Name: Split-proxy compose render
-  - Confidence: High
-  - Evidence: `deploy/scripts/remote-deploy.sh` appends `deploy/compose.production.split-proxy.yml` when `ENABLE_SPLIT_PROXY=true`.
-- Gate Name: Server compile
-  - Confidence: High
-  - Evidence: `AGENTS.md`; `.github/workflows/pr-test-build.yml` build step.
-- Gate Name: Stale reference scan
-  - Confidence: Medium
-  - Evidence: deployment failure log and removed service/environment keys.
-
-## Suggested Gate Run (Local)
-
-1. `docker compose -f deploy/compose.production.yml --env-file deploy/.env.example config --services`
-   - Rationale: verify the base production stack no longer includes the old service.
-2. `docker compose -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml --env-file deploy/.env.example config --services`
-   - Rationale: verify optional split-proxy still composes with the base stack.
-3. `rg -n "Usage Service|TAILSCALE_CPA_MANAGER_PORT|18318|CPA_MANAGER_IMAGE|CPA_MANAGER_USAGE_QUERY_LIMIT|cpa-manager" deploy .github/workflows`
-   - Rationale: verify production deploy docs/workflows no longer carry legacy service references.
-4. `go build -o test-output ./cmd/server && rm test-output`
-   - Rationale: preserve the repo's standard compile gate.
-
-## Executed Gates
-
-1. Production compose render
-   - Command: `docker compose -f deploy/compose.production.yml --env-file deploy/.env.example config --services`
-   - Result: Passed; output was `cli-proxy-api`.
-2. Split-proxy compose render
-   - Command: `docker compose -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml --env-file deploy/.env.example config --services`
-   - Result: Passed; output was `split-proxy` and `cli-proxy-api`.
-3. Stale reference scan
-   - Command: `rg -n "Usage Service|TAILSCALE_CPA_MANAGER_PORT|18318|CPA_MANAGER_IMAGE|CPA_MANAGER_USAGE_QUERY_LIMIT|cpa-manager" deploy .github/workflows`
-   - Result: Passed; no stale legacy production refs.
-4. Workflow removal check
-   - Command: `test ! -f .github/workflows/update-cpa-manager-image.yml`
-   - Result: Passed.
-5. Server compile
-   - Command: `go build -o test-output ./cmd/server && rm test-output`
-   - Result: Passed.
-
-## Final Self-Review
-
-- Security & secrets: No secrets added; obsolete `.env.example` secret placeholders for the old service were removed.
-- Edge cases & error handling: External owners of the old port no longer block this stack because it no longer binds that port.
-- Backward compatibility / migrations: No data migration; old remote data directories are untouched.
-- API/contract compatibility: No public API changes.
-- Observability: No logging or metrics changes.
-- Config/env changes: Removed unused production-only env sample keys; docs updated.
-- Performance risk: No runtime hot-path changes.
-- Rollback plan: Revert the hotfix files, but only after ensuring the old port is free.
-
-## PR-ready checklist
-
-- [x] `docker compose -f deploy/compose.production.yml --env-file deploy/.env.example config --services`
-- [x] `docker compose -f deploy/compose.production.yml -f deploy/compose.production.split-proxy.yml --env-file deploy/.env.example config --services`
-- [x] Stale legacy production reference scan
-- [x] `.github/workflows/update-cpa-manager-image.yml` absent
-- [x] `go build -o test-output ./cmd/server && rm test-output`
-
----
-
-# Quality Gate Addendum: xAI streamed free-usage failover and Grok pool repair
-
-- Date: 2026-07-23
-- Scope: Detect xAI quota errors embedded in HTTP 200 SSE, trigger credential cooldown/failover, harden the Grok inspection policy, and remediate production credentials.
-
-## Executed repository gates
-
-1. Formatting
-   - Command: `gofmt` on changed Go files.
-   - Result: Passed.
-2. Focused executor and auth-manager tests
-   - Scope: xAI stream error parsing, normal stream behavior, 24-hour free-usage retry hint, and cross-credential stream failover.
-   - Result: Passed.
-3. Affected package tests
-   - Scope: `internal/runtime/executor` and `sdk/cliproxy/auth`.
-   - Result: Passed.
-4. Full tests
-   - Command: `go test ./...`
-   - Result: Passed.
-5. Required server build
-   - Command: `go build -o /tmp/cliproxyapi-test-output-0723 ./cmd/server`
-   - Result: Passed.
-6. Deployment script syntax
-   - Command: `bash -n deploy/scripts/run-grok-inspection.sh`
-   - Result: Passed.
-7. Protected translator path check
-   - Result: Passed; no `internal/translator/**` files changed.
-
-## Executed production gates
-
-1. Deployment revision and process state
-   - Result: Passed; container revision `0672a88e4412aa2d3cc2c8697cdc963f0acc7a72` is running.
-2. Runtime configuration
-   - Result: Passed; management API reports persisted cooldowns enabled and round-robin routing.
-3. Inspection policy and timer
-   - Result: Passed; deployed script matches the tracked checksum, excludes rolling quota/probe errors from permanent disable, and the timer is active.
-4. Credential recovery
-   - Result: Passed; 1344 remaining fresh-healthy targets are present and enabled, with none left disabled.
-5. Hard-dead deletion
-   - Result: Passed; 481 fresh reauth credentials were backed up and deleted, both checksum manifests pass, and all target source files are absent.
-6. Secret handling
-   - Result: Passed; the management key was read only on the production host and never printed; credential contents and account target lists were not emitted.
-
-## Residual risk
-
-- No `/v1/messages` traffic occurred in the final ten-minute observation window, so no production `.cds` file was naturally created and client-visible retry reduction was not measured.
-- The behavior is covered by focused executor/auth-manager tests; production confirmation should be collected on the next organic quota event without reading or exposing a client key.
-
-## Rollback
-
-- Code/image, config backup, and credential archive procedures are recorded in `.osc/tasks/07-23-claude-code-code-subscription-free/changes/rollback-notes.md`.
-
----
-
-# Quality Gate Addendum: persist Grok inspection permission-denied policy
-
-- Date: 2026-07-24
-- Scope: Track and install the production Grok inspection systemd service/timer so spending-limit credentials remain excluded from routing.
+Date: 2026-07-27
+Task: `.osc/tasks/07-27-extract-egress-proxy-pool`
+Status: PASS with one pre-existing unrelated race-test finding
 
 ## Changed scope
 
-- `deploy/systemd/grok-inspection.service`
-- `deploy/systemd/grok-inspection.timer`
-- `deploy/scripts/remote-deploy.sh`
-- `deploy/README.md`
-- OSC project/task/quality artifacts
+- New sibling Git project: `/root/Projects/Go/src/EgressProxyPool`.
+- Standalone pool/controller/subscription runtime and authenticated `/v1` API.
+- CLIProxyAPI remote pool client and simplified configuration.
+- CLIProxyAPI Management API compatibility facade and deployment integration.
+- No changes under `internal/translator/**`.
 
-## Executed gates
+## Required and focused gates
 
-1. Diff and security checks
-   - Commands: `git diff --check`; exact class-list assertions; management-key value scan.
-   - Result: Passed; no secret value or unsafe quota/probe class was added.
-2. Shell syntax
-   - Command: `bash -n deploy/scripts/remote-deploy.sh deploy/scripts/run-grok-inspection.sh`
-   - Result: Passed.
-3. Compose renders
-   - Commands: base and split-proxy `docker compose ... config --services`.
-   - Result: Passed; expected services were rendered.
-4. Linux systemd validation
-   - Command: `systemd-analyze verify` against both tracked units on `bytevirt`.
-   - Result: Passed; the host emitted only an unrelated warning for its packaged snapd unit.
-5. Required server build
-   - Command: `go build -o /tmp/cliproxyapi-test-output-0724 ./cmd/server`
-   - Result: Passed.
-6. Production safe apply
-   - Result: Passed; 112/112 `permission_denied` credentials were disabled, none deleted, and no apply failures were reported.
-7. Post-apply observation
-   - Result: 23 `/v1/messages` requests returned HTTP 200 with no `personal-team-blocked:spending-limit` log entry in the observation window.
+| Project / command | Result |
+|---|---|
+| EgressProxyPool `gofmt -w .` | PASS |
+| EgressProxyPool `go test ./...` | PASS |
+| EgressProxyPool `go test -race ./internal/api ./internal/pool` | PASS |
+| EgressProxyPool `go vet ./...` | PASS |
+| EgressProxyPool `go build -o test-output ./cmd/server && rm test-output` | PASS |
+| EgressProxyPool Docker image build | PASS |
+| CLIProxyAPI `gofmt -w .` | PASS |
+| CLIProxyAPI `go test ./...` | PASS |
+| CLIProxyAPI focused xAI/helper/management race tests | PASS |
+| CLIProxyAPI `go vet` on changed packages | PASS |
+| CLIProxyAPI `go build -o test-output ./cmd/server && rm test-output` | PASS |
+| `git diff --check` and `bash -n deploy/scripts/remote-deploy.sh` | PASS |
 
-## Final self-review
+The Docker build needed the host HTTPS proxy for dependency download after one
+direct `proxy.golang.org` timeout; the resulting image compiled successfully.
 
-- Security: Units contain only the management-key file path, never the key value.
-- Recovery semantics: `quota_exhausted` and `probe_error` remain outside permanent disable.
-- Compatibility: No Go/API behavior changed; non-systemd hosts receive a warning and continue deployment.
-- Performance: Three workers, CPU quota, memory limit, and the five-minute interval remain unchanged.
-- Rollback: Revert the deploy files and restore the timestamped production unit backup documented in the task rollback notes.
+## Deployment gates
 
----
+| Check | Result |
+|---|---|
+| EgressProxyPool `docker compose config` | PASS |
+| CLIProxyAPI base + standalone-pool overlay Compose render | PASS |
+| No controller/Mihomo host port publication | PASS |
+| No host network, privileged mode, TUN, or `cap_add` | PASS |
+| Both containers use `cap_drop: ALL` and `no-new-privileges` | PASS |
+| CLIProxyAPI mounts only the standalone API token | PASS |
 
-# Quality Gate Addendum: limit xAI credential refresh storm
+The expected existing CLIProxyAPI Tailscale management host port remains in the
+combined render; the pool overlay adds no published port.
 
-- Date: 2026-07-24
-- Scope: Stop disabled/permanently invalid xAI credentials from repeatedly refreshing and reduce pressure on the shared upstream proxy.
+## Security and compatibility review
 
-## Executed repository gates
+- PASS: constant-time bearer-token comparison and bounded strict JSON bodies.
+- PASS: raw auth IDs are never sent; route keys are HMAC-SHA256 digests.
+- PASS: client transport bypasses environment/global proxies for private control
+  traffic and never logs tokens or request bodies.
+- PASS: subscription URLs remain write-only and errors are redacted.
+- PASS: registry/generated files retain atomic mode-`0600` behavior.
+- PASS: probe leases are random, single-use, expiring, and released on shutdown.
+- PASS: established xAI streams get no new read deadline and are not replayed
+  after downstream payload.
+- PASS: explicit auth proxy precedence and request-scoped managed errors remain.
+- PASS: protected `internal/translator/**` is unchanged.
+- PASS: no production host, configuration, subscription, or service was changed.
 
-1. Focused scheduler and xAI refresh tests
-   - Result: Passed; disabled auths are unscheduled and explicit `invalid_grant` maps to unauthorized.
-2. Affected package tests
-   - Commands: `go test ./sdk/cliproxy/auth -count=1`; `go test ./internal/runtime/executor -count=1`.
-   - Result: Passed.
-3. Full tests
-   - Command: `go test ./... -count=1`.
-   - Result: Passed in the canonical local project. The first canonical run hit one unrelated 120-second cancellation-test timeout; that test passed immediately in isolation and the complete rerun passed.
-4. Required server build
-   - Command: `go build -o test-output ./cmd/server && rm test-output`.
-   - Result: Passed in the canonical local project.
-5. Formatting and diff checks
-   - Commands: `gofmt`; `git diff --check`.
-   - Result: Passed.
-6. Protected path check
-   - Result: Passed; no `internal/translator/**` files changed.
+## Pre-existing race finding
 
-## Executed production gates
-
-1. Image identity and service health
-   - Result: Passed; `cliproxyapi:xai-refresh-fix-20260724` is running and the private management endpoint returns HTTP 200.
-2. Runtime configuration
-   - Result: Passed; two auto-refresh workers, 300-second transient cooldown, bounded request retries, and 15-second SSE keepalive are active.
-3. Refresh audit
-   - Result: Passed; zero disabled credentials refreshed. The observed `invalid_grant` ran once and did not recur after the legacy five-minute backoff interval.
-4. End-to-end request
-   - Result: Passed; a real Claude-compatible Grok stream completed through Cloudflare with HTTP 200 and `message_stop`.
-5. Gateway observation
-   - Result: Passed; the post-verification window contained successful `/v1/messages` responses and no 429/500/502/503/504/524 response.
-
-## Final self-review
-
-- Security: No credential contents or management key were added to source artifacts.
-- Data safety: No credential files were deleted; the pre-change config backup is retained.
-- Recovery: Re-enabling a credential returns it to normal automatic refresh scheduling.
-- Rollback: Restore the timestamped config backup and recreate the service with the previous GHCR image.
+Running race mode for the entire `internal/runtime/executor` package reports an
+existing Antigravity credits test-cleanup race between
+`resetAntigravityCreditsRetryState` and background credit-refresh goroutines in
+`antigravity_executor_credits_test.go` / `antigravity_executor.go`. Those files
+are outside this change. The xAI proxy-pool executor tests, helper client tests,
+and management tests pass under race mode.
