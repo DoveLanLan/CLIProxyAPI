@@ -132,6 +132,9 @@ type Config struct {
 	// XAIProxyPool configures an optional xAI-only proxy lane pool.
 	XAIProxyPool XAIProxyPoolConfig `yaml:"xai-proxy-pool" json:"xai-proxy-pool"`
 
+	// XAIResinProxy configures optional per-auth sticky xAI routing through Resin.
+	XAIResinProxy XAIResinProxyConfig `yaml:"xai-resin-proxy" json:"xai-resin-proxy"`
+
 	// Codex configures provider-wide Codex request behavior.
 	Codex CodexConfig `yaml:"codex" json:"codex"`
 
@@ -365,6 +368,16 @@ type XAIProxyPoolConfig struct {
 	Enabled          bool   `yaml:"enabled" json:"enabled"`
 	ServiceURL       string `yaml:"service-url" json:"service-url"`
 	ServiceTokenFile string `yaml:"service-token-file" json:"service-token-file"`
+}
+
+// XAIResinProxyConfig routes xAI traffic through Resin while deriving a stable
+// anonymous Resin account for each selected CPA auth.
+type XAIResinProxyConfig struct {
+	Enabled         bool   `yaml:"enabled" json:"enabled"`
+	ProxyURL        string `yaml:"proxy-url" json:"proxy-url"`
+	Platform        string `yaml:"platform" json:"platform"`
+	ProxyTokenFile  string `yaml:"proxy-token-file" json:"proxy-token-file"`
+	IdentityKeyFile string `yaml:"identity-key-file" json:"identity-key-file"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
@@ -851,6 +864,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Sanitize the optional xAI-only proxy pool.
 	cfg.SanitizeXAIProxyPool()
 
+	// Sanitize optional xAI routing through Resin.
+	cfg.SanitizeXAIResinProxy()
+
 	// Sanitize Codex header defaults.
 	cfg.SanitizeCodexHeaderDefaults()
 
@@ -1075,6 +1091,41 @@ func (cfg *Config) SanitizeXAIProxyPool() {
 	pool := &cfg.XAIProxyPool
 	pool.ServiceURL = normalizeHTTPURL(pool.ServiceURL)
 	pool.ServiceTokenFile = strings.TrimSpace(pool.ServiceTokenFile)
+}
+
+// SanitizeXAIResinProxy normalizes the xAI Resin forward-proxy settings.
+// Invalid enabled settings remain enabled and fail closed at runtime.
+func (cfg *Config) SanitizeXAIResinProxy() {
+	if cfg == nil {
+		return
+	}
+	resin := &cfg.XAIResinProxy
+	resin.ProxyURL = normalizeForwardProxyURL(resin.ProxyURL)
+	resin.Platform = strings.TrimSpace(resin.Platform)
+	if resin.Platform == "" {
+		resin.Platform = "Default"
+	}
+	resin.ProxyTokenFile = strings.TrimSpace(resin.ProxyTokenFile)
+	resin.IdentityKeyFile = strings.TrimSpace(resin.IdentityKeyFile)
+}
+
+func normalizeForwardProxyURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, errParse := url.Parse(raw)
+	if errParse != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return ""
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+		parsed.Path = ""
+		parsed.RawPath = ""
+		return parsed.String()
+	default:
+		return ""
+	}
 }
 
 func normalizeHTTPURL(raw string) string {

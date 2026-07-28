@@ -22,15 +22,15 @@ This repository is not a conventional browser frontend project. The interactive 
 
 - Repo root: `/root/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
-- Current task: `.osc/tasks/07-27-extract-egress-proxy-pool`
-- Immediate implication: Mihomo control-plane ownership is moving to the sibling `EgressProxyPool` project while xAI response interpretation remains in this repository.
+- Current task: `.osc/tasks/07-27-xai-resin-routing`
+- Immediate implication: xAI can use Resin sticky forward-proxy routing with one CPA configuration block and deterministic per-auth identities, without per-credential proxy edits.
 
 **Repo Snapshot**
 - **Modules/Components:** `cmd/server` is the runnable server entrypoint; `internal/{api,auth,cmd,config,logging,managementasset,runtime,store,tui,usage,watcher,wsrelay,...}` contains server-only runtime code; `sdk/{api,auth,cliproxy,config,logging,translator}` is the reusable embedding surface; `docs/`, `examples/`, and `test/` hold consumer docs, samples, and regression coverage. (confidence: High) — evidence: `README.md`, `cmd/server/main.go`, `internal/`, `sdk/`, `docs/`, `examples/`, `test/`
 - **Toolchains:** build uses Go modules plus `go build ./cmd/server`, a multi-stage Docker image, and GoReleaser archives (High); tests exist both as package tests and top-level regressions under `test/`, but the shallow CI inventory only enforces build on pull requests (Medium); no dedicated lint/staticcheck config was found at depth <= 2, so explicit source-format enforcement is mostly standard Go tooling plus review convention (Low). — evidence: `go.mod`, `Dockerfile`, `docker-compose.yml`, `.goreleaser.yml`, `.github/workflows/pr-test-build.yml`, `.github/workflows/release.yaml`, `.github/workflows/docker-image.yml`
 - **Style/Format Enforcement:** the strongest enforced process rules are the `osc` artifact-first workflow, protected `internal/translator/**` PR boundary, and comment-preserving config persistence through management handlers. (confidence: Medium) — evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.github/workflows/pr-path-guard.yml`, `internal/api/handlers/management/config_basic.go`, `internal/api/handlers/management/handler.go`
 - **CI Gates/Expectations:** pull requests must compile `./cmd/server`; pull requests touching `internal/translator/**` are rejected; main/tag pushes publish Docker images, and successful main Docker builds trigger the production deploy workflow. Tag pushes publish GoReleaser artifacts with embedded version metadata. (confidence: High) — evidence: `.github/workflows/pr-test-build.yml`, `.github/workflows/pr-path-guard.yml`, `.github/workflows/docker-image.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/release.yaml`, `.goreleaser.yml`, `Dockerfile`, `deploy/scripts/remote-deploy.sh`
-- **Open Questions (max 1):** None. The extraction task is selected and contains its proposal, spec, and task artifacts.
+- **Open Questions (max 1):** None. The Resin routing task is selected and contains its proposal, spec, and task artifacts.
 
 ## Product Surfaces
 
@@ -98,6 +98,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 6. Production Grok inspection systemd units are tracked under `deploy/systemd/` and installed by `deploy/scripts/remote-deploy.sh`; keep permanent disable classes aligned with `deploy/scripts/run-grok-inspection.sh` and never put the management key value in a unit. — Evidence: `deploy/systemd/grok-inspection.service`, `deploy/systemd/grok-inspection.timer`, `deploy/scripts/remote-deploy.sh` (Documented; confidence: High; added 2026-07-24)
 7. CPA-generated retry guidance may bypass upstream header passthrough only through a narrow managed-error contract; arbitrary upstream headers must remain controlled by `passthrough-headers`. — Evidence: `sdk/api/handlers/handlers.go`, `sdk/api/handlers/handlers_error_response_test.go` (Documented; confidence: High; added 2026-07-27)
 8. xAI egress subscriptions, Mihomo control, lane selection, quarantine, and persistent pool state belong to the standalone `EgressProxyPool` project. CLIProxyAPI retains exact-402 classification and safe HTTP/SSE/WebSocket replay and accesses the pool only through its authenticated private API. — Evidence: `internal/runtime/executor/helps/xai_proxy_pool.go`, `internal/runtime/executor/xai_proxy_pool_executor.go`, `deploy/compose.production.xai-proxy.yml` (Documented; confidence: High; added 2026-07-27)
+9. Optional xAI Resin routing derives a stable anonymous Account as `xai-<HMAC-SHA256(identity-key, auth-id)[:16]>` at runtime. Explicit auth proxies remain higher priority; Resin and EgressProxyPool are mutually exclusive; secret-file failures and Resin transport failures fail closed without cooling xAI credentials or falling back to the global proxy. — Evidence: `internal/runtime/executor/helps/xai_resin_proxy.go`, `internal/runtime/executor/xai_proxy_pool_executor.go`, `deploy/XAI_RESIN_PROXY_SETUP_CN.md` (Documented; confidence: High; added 2026-07-27)
 
 #### D) Testing strategy & coverage expectations
 1. Treat `go build -o test-output ./cmd/server` as the minimum must-pass pull-request gate, because that is the explicitly wired PR CI check. — Evidence: `.github/workflows/pr-test-build.yml` (Documented; confidence: High)
@@ -112,11 +113,11 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 ### Top 8 Constraints
 
-- Constraint 1: Current source changes should stay within `.osc/tasks/07-27-extract-egress-proxy-pool` unless a new task is selected.
+- Constraint 1: Current source changes should stay within `.osc/tasks/07-27-xai-resin-routing` unless a new task is selected.
 - Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist or are updated, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
 - Constraint 3: Required repo artifacts do not live only in chat: baseline rules go in `.osc/spec/project-spec.md`, task change packages go in `.osc/tasks/<task-dir>/changes/`, and quality results go in `.osc/quality-gate.md`.
 - Constraint 4: This repository is primarily a Go proxy/server and embeddable SDK, not a bundled browser frontend. UI work in-tree normally means Bubble Tea TUI work or management asset integration.
 - Constraint 5: `cmd/server` is the runnable entrypoint, and at minimum every pull request must keep `go build ./cmd/server` passing under Go `1.26`.
 - Constraint 6: `internal/translator/**` is a protected boundary and cannot be changed through ordinary pull-request work.
 - Constraint 7: API-facing changes must be checked against the multi-provider compatibility promise and the reusable SDK/examples that expose the same behavior.
-- Constraint 8: Do not move Mihomo subscriptions or control-plane state back into CLIProxyAPI; keep the standalone service contract narrow and preserve fail-closed xAI routing.
+- Constraint 8: Keep xAI automatic egress backends mutually exclusive and fail closed. Resin identities must remain runtime-derived from stable auth IDs and a CPA-only key; do not persist derived proxy credentials into auth files or fall back to CPA's global proxy on Resin failures.

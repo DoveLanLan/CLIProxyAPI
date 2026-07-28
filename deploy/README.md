@@ -6,6 +6,7 @@ Additional guide:
 
 - Chinese split-proxy setup: [SPLIT_PROXY_SETUP_CN.md](/root/Projects/Go/src/CLIProxyAPI/deploy/SPLIT_PROXY_SETUP_CN.md)
 - Chinese xAI proxy-pool setup: [XAI_PROXY_POOL_SETUP_CN.md](XAI_PROXY_POOL_SETUP_CN.md)
+- Chinese xAI Resin setup: [XAI_RESIN_PROXY_SETUP_CN.md](XAI_RESIN_PROXY_SETUP_CN.md)
 
 ## Topology
 
@@ -25,6 +26,7 @@ Recommended root on the VPS:
   compose.production.yml
   compose.production.split-proxy.yml
   compose.production.xai-proxy.yml
+  compose.production.xai-resin.yml
   data/config.yaml
   data/auths/
   data/logs/
@@ -54,6 +56,8 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
    - `ENABLE_XAI_PROXY_POOL=true` only after starting the standalone EgressProxyPool project
    - `EGRESS_PROXY_NETWORK` and `EGRESS_PROXY_API_TOKEN` to its shared network and token path
+   - `ENABLE_XAI_RESIN_PROXY=true` to mount the Resin proxy token and CPA-only identity key
+   - never enable `ENABLE_XAI_PROXY_POOL` and `ENABLE_XAI_RESIN_PROXY` together
    - `UPSTREAM_PROXY_HOST` / `UPSTREAM_PROXY_PORT` / `UPSTREAM_PROXY_LOGIN` only when split-proxy is enabled
 3. Create `data/config.yaml` on the VPS.
 4. Create `data/auths/` and place any existing auth files there if needed.
@@ -71,6 +75,15 @@ The overlay publishes no additional host ports and does not change system
 routing. See
 [XAI_PROXY_POOL_SETUP_CN.md](XAI_PROXY_POOL_SETUP_CN.md)
 for staged rollout and rollback steps.
+
+## xAI Resin Option
+
+The optional `compose.production.xai-resin.yml` overlay mounts a Resin proxy
+token and a separate CPA-only identity key. CPA derives one anonymous, stable
+Resin Account per xAI auth at request time, so auth files do not need individual
+proxy settings. Resin and CLIProxyAPI must share the base `vps-gateway` network.
+See [XAI_RESIN_PROXY_SETUP_CN.md](XAI_RESIN_PROXY_SETUP_CN.md) for the complete
+two-sided configuration and limitations.
 
 ## Dynamic Plugins
 

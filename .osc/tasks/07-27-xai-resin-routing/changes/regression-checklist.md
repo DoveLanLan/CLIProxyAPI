@@ -1,0 +1,32 @@
+# Regression checklist: native xAI Resin routing
+
+- [x] Resin routing is disabled by default.
+- [x] The Platform defaults to `Default` and proxy URLs are normalized.
+- [x] Credentialed, path-bearing, query-bearing, and unsupported proxy URLs fail closed.
+- [x] Missing token files and identity keys shorter than 32 bytes fail closed.
+- [x] Resin V1 reserved Platform/token values are rejected.
+- [x] HMAC identity output matches a fixed known vector and is stable per auth ID.
+- [x] Different auth IDs produce different anonymous Resin Accounts.
+- [x] Explicit auth proxies bypass Resin and remain the highest priority.
+- [x] Resin routing takes precedence over EgressProxyPool without calling its API.
+- [x] Simultaneous automatic backends fail closed and deployment flags are rejected.
+- [x] HTTP sends the expected Resin Basic proxy authentication.
+- [x] SSE and WebSocket network failures remain request-scoped.
+- [x] Different xAI auths produce different WebSocket proxy session targets.
+- [x] OAuth refresh uses Resin after an auth ID exists and restores the persisted proxy.
+- [x] Exact xAI spending-limit 402 does not invoke the EgressProxyPool probe flow.
+- [x] Resin network failures do not fall back to EgressProxyPool or the global proxy.
+- [x] Config reload change details expose non-secret fields and redact secret paths.
+- [x] Compose mounts both secret files read-only on the shared gateway network.
+- [x] `go test ./...`, focused Resin race tests, vet, and server build pass.
+- [x] `git diff --check`, deploy script syntax, Compose render, and translator guard pass.
+- [x] Production CPA runs `cliproxyapi:xai-resin-20260728` on `vps-gateway` and returns HTTP 200.
+- [x] Production Resin remained healthy; routable `Default` nodes were 422 at rollout and 402 after exhaustive checking.
+- [x] Production flags enable Resin and disable EgressProxyPool.
+- [x] Production secret source files are mode `0600` and CPA mounts them read-only.
+- [x] Real CPA requests created 89 correctly formatted dynamic xAI leases and no malformed leases.
+- [x] Real requests reached xAI; sampled credentials were rejected upstream with spending-limit 402.
+- [x] The pre-rollout backup and rollback point are present on the VPS.
+- [x] All 1,291 enabled xAI credentials were checked exactly once through their derived Resin Accounts.
+- [x] Every expected enabled-credential Account exists in Resin; zero are missing and zero xAI Account names are malformed.
+- [x] No enabled credential returned 200: 1,283 returned spending-limit 402 and 8 retained 401 tokens.

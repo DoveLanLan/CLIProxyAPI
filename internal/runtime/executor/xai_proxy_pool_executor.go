@@ -23,9 +23,10 @@ const xaiBlockedSpendingLimitCode = "personal-team-blocked:spending-limit"
 const xaiProxyRouteAttribute = "_cliproxy_xai_proxy_route"
 
 type xaiProxyRoutedAuth struct {
-	auth  *cliproxyauth.Auth
-	route helps.XAIProxyRoute
-	used  bool
+	auth      *cliproxyauth.Auth
+	route     helps.XAIProxyRoute
+	resinUsed bool
+	poolUsed  bool
 }
 
 type xaiProxyRequestScopedNetworkError struct {
@@ -51,7 +52,21 @@ func (e *xaiProxyRequestScopedNetworkError) StatusCode() int { return http.Statu
 func (e *xaiProxyRequestScopedNetworkError) IsRequestScoped() bool { return true }
 
 func (e *XAIAutoExecutor) routedAuth(ctx context.Context, auth *cliproxyauth.Auth) (xaiProxyRoutedAuth, error) {
-	if e == nil || e.proxyPool == nil || auth == nil || strings.TrimSpace(auth.ProxyURL) != "" {
+	if e == nil || auth == nil || strings.TrimSpace(auth.ProxyURL) != "" {
+		return xaiProxyRoutedAuth{auth: auth}, nil
+	}
+	if e.resinProxy != nil {
+		proxyURL, routed, errResin := e.resinProxy.ProxyURL(auth.ID)
+		if errResin != nil {
+			return xaiProxyRoutedAuth{}, errResin
+		}
+		if routed {
+			cloned := auth.Clone()
+			cloned.ProxyURL = proxyURL
+			return xaiProxyRoutedAuth{auth: cloned, resinUsed: true}, nil
+		}
+	}
+	if e.proxyPool == nil {
 		return xaiProxyRoutedAuth{auth: auth}, nil
 	}
 	route, enrolled, errRoute := e.proxyPool.Route(ctx, auth.ID)
@@ -61,7 +76,7 @@ func (e *XAIAutoExecutor) routedAuth(ctx context.Context, auth *cliproxyauth.Aut
 	if !enrolled {
 		return xaiProxyRoutedAuth{auth: auth}, nil
 	}
-	return xaiProxyRoutedAuth{auth: cloneXAIAuthWithRoute(auth, route), route: route, used: true}, nil
+	return xaiProxyRoutedAuth{auth: cloneXAIAuthWithRoute(auth, route), route: route, poolUsed: true}, nil
 }
 
 func cloneXAIAuthWithRoute(auth *cliproxyauth.Auth, route helps.XAIProxyRoute) *cliproxyauth.Auth {
@@ -98,7 +113,10 @@ func executeXAIWithProxyPool[T any](ctx context.Context, e *XAIAutoExecutor, aut
 		return zero, errRoute
 	}
 	result, errRun := run(routed.auth)
-	if !routed.used || errRun == nil {
+	if routed.resinUsed {
+		return result, requestScopeXAIProxyNetworkError(errRun)
+	}
+	if !routed.poolUsed || errRun == nil {
 		return result, errRun
 	}
 	if isXAIBlockedSpendingLimit(errRun) {
@@ -151,7 +169,14 @@ func (e *XAIAutoExecutor) executeStreamWithProxyPool(ctx context.Context, auth *
 	if errRoute != nil {
 		return nil, errRoute
 	}
-	if !routed.used {
+	if routed.resinUsed {
+		stream, errRun := run(routed.auth)
+		if errRun != nil {
+			return nil, requestScopeXAIProxyNetworkError(errRun)
+		}
+		return wrapXAIResinStream(ctx, stream), nil
+	}
+	if !routed.poolUsed {
 		return run(routed.auth)
 	}
 	return e.executeRoutedXAIStream(ctx, auth, routed.auth, routed.route, run, true)
@@ -305,6 +330,34 @@ func wrapXAIProxyStream(ctx context.Context, pool xaiProxyPoolClient, route help
 	return &cliproxyexecutor.StreamResult{Headers: headers, Chunks: out}
 }
 
+func wrapXAIResinStream(ctx context.Context, stream *cliproxyexecutor.StreamResult) *cliproxyexecutor.StreamResult {
+	if stream == nil || stream.Chunks == nil {
+		return stream
+	}
+	out := make(chan cliproxyexecutor.StreamChunk)
+	go func() {
+		defer close(out)
+		for chunk := range stream.Chunks {
+			chunk.Err = requestScopeXAIProxyNetworkError(chunk.Err)
+			if ctx == nil {
+				out <- chunk
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				drainXAIProxyStream(stream)
+				return
+			case out <- chunk:
+			}
+		}
+	}()
+	headers := http.Header(nil)
+	if stream.Headers != nil {
+		headers = stream.Headers.Clone()
+	}
+	return &cliproxyexecutor.StreamResult{Headers: headers, Chunks: out}
+}
+
 func drainXAIProxyStream(stream *cliproxyexecutor.StreamResult) {
 	if stream == nil || stream.Chunks == nil {
 		return
@@ -358,6 +411,13 @@ func isXAIProxyNetworkError(err error) bool {
 		strings.Contains(strings.ToLower(err.Error()), "connection closed") ||
 		strings.Contains(strings.ToLower(err.Error()), "connection reset") ||
 		strings.Contains(strings.ToLower(err.Error()), "broken pipe")
+}
+
+func requestScopeXAIProxyNetworkError(err error) error {
+	if !isXAIProxyNetworkError(err) {
+		return err
+	}
+	return &xaiProxyRequestScopedNetworkError{cause: err}
 }
 
 func cloneReplayableXAIRequest(ctx context.Context, req *http.Request) (*http.Request, error) {

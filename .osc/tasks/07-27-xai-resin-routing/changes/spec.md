@@ -1,0 +1,91 @@
+# Spec: xAI Resin proxy routing
+
+## Configuration contract
+
+```yaml
+xai-resin-proxy:
+  enabled: false
+  proxy-url: "http://resin:2260"
+  platform: "Default"
+  proxy-token-file: "/run/secrets/resin-proxy-token"
+  identity-key-file: "/run/secrets/resin-identity-key"
+```
+
+- `proxy-url` accepts HTTP, HTTPS, SOCKS5, or SOCKS5H forward-proxy URLs and must
+  not contain userinfo, query, or fragment data.
+- `platform` defaults to `Default` and must be compatible with Resin V1 naming.
+- `proxy-token-file` contains the exact Resin `RESIN_PROXY_TOKEN`.
+- `identity-key-file` is CPA-only and contains at least 32 bytes of stable random
+  key material. It is never sent to Resin.
+
+## Identity contract
+
+For auth ID `A` and identity key `K`:
+
+1. Calculate `HMAC-SHA256(K, A)`.
+2. Encode the first 16 bytes as lowercase hexadecimal.
+3. Set Account to `xai-<32 hex characters>`.
+4. Set the proxy username to `<Platform>.<Account>` and password to the Resin
+   proxy token using `url.UserPassword`.
+
+The same stable auth ID and key produce the same Account across requests and
+restarts. Different auth IDs have negligible collision probability. Rotating
+only the Resin proxy token does not change Accounts; rotating the identity key
+does.
+
+## Routing precedence
+
+1. A non-empty auth `ProxyURL` is used unchanged.
+2. Enabled Resin routing derives an in-memory proxy URL.
+3. Otherwise the existing EgressProxyPool route may be selected.
+4. If neither applies, existing global/context proxy behavior remains.
+
+Enabled Resin plus enabled EgressProxyPool is an invalid automatic-routing
+combination and fails closed for auths without an explicit proxy override.
+
+## Runtime coverage
+
+The existing `XAIAutoExecutor` wrappers must route:
+
+- generic `HttpRequest` calls used by management tooling;
+- non-streaming HTTP execution;
+- SSE streaming execution;
+- downstream/upstream WebSocket execution;
+- OAuth refresh after an auth ID exists.
+
+Derived proxy data is transient. Refresh results restore the original persisted
+auth proxy and remove transient route attributes.
+
+Resin transport-level network failures are request-scoped across HTTP, stream,
+WebSocket, and refresh paths. They must not cool a valid xAI credential, retry
+through unrelated credentials, invoke EgressProxyPool, or fall back to the CPA
+global proxy.
+
+## Error behavior
+
+Enabled but unusable Resin configuration returns a request-scoped 503-style
+error and does not fall back to CPA's global proxy. Error text must identify the
+configuration class without including secret contents or credentialed URLs.
+
+## Operational limitation
+
+Resin's standard HTTP CONNECT tunnel cannot inspect encrypted xAI HTTP response
+codes. This change does not release Resin leases or retry another Resin Account
+when xAI returns an exact spending-limit 402.
+
+## Production rollout contract
+
+- Audit the live CPA and Resin stacks without printing secret values.
+- Reuse the live Resin proxy token for CPA and generate a new CPA-only identity
+  key with mode `0600`.
+- Back up every changed production file before replacement.
+- Keep Resin on `vps-gateway`; mount both CPA secret files read-only.
+- Deploy the reviewed CPA source without changing Resin subscriptions,
+  Platforms, or existing auth files.
+- A production-local image uses the reserved `cliproxyapi:*` tag prefix; the
+  deploy script must verify that it exists locally instead of attempting a
+  registry pull. Registry-qualified release images retain normal pull behavior.
+- Verify container health, Resin forward proxy authentication, CPA startup,
+  dynamic xAI Account creation, and one real CPA xAI request.
+- On any failed verification, restore the previous CPA files/image/config and
+  leave Resin data intact.

@@ -27,6 +27,11 @@ if [[ "${ENABLE_SPLIT_PROXY:-false}" == "true" ]]; then
   COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.split-proxy.yml")
 fi
 
+if [[ "${ENABLE_XAI_PROXY_POOL:-false}" == "true" && "${ENABLE_XAI_RESIN_PROXY:-false}" == "true" ]]; then
+  echo "error: ENABLE_XAI_PROXY_POOL and ENABLE_XAI_RESIN_PROXY are mutually exclusive" >&2
+  exit 1
+fi
+
 if [[ "${ENABLE_XAI_PROXY_POOL:-false}" == "true" ]]; then
   COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.xai-proxy.yml")
   EGRESS_PROXY_NETWORK="${EGRESS_PROXY_NETWORK:-egress-proxy}"
@@ -42,6 +47,22 @@ if [[ "${ENABLE_XAI_PROXY_POOL:-false}" == "true" ]]; then
   fi
   chmod 600 "$EGRESS_PROXY_API_TOKEN"
   export EGRESS_PROXY_NETWORK EGRESS_PROXY_API_TOKEN
+fi
+
+if [[ "${ENABLE_XAI_RESIN_PROXY:-false}" == "true" ]]; then
+  COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.xai-resin.yml")
+  XAI_RESIN_PROXY_TOKEN_FILE="${XAI_RESIN_PROXY_TOKEN_FILE:-/opt/resin/secrets/proxy-token}"
+  XAI_RESIN_IDENTITY_KEY_FILE="${XAI_RESIN_IDENTITY_KEY_FILE:-/opt/cliproxyapi/secrets/resin-identity-key}"
+  if [[ ! -s "$XAI_RESIN_PROXY_TOKEN_FILE" ]]; then
+    echo "error: missing Resin proxy token file: $XAI_RESIN_PROXY_TOKEN_FILE" >&2
+    exit 1
+  fi
+  if [[ ! -s "$XAI_RESIN_IDENTITY_KEY_FILE" ]]; then
+    echo "error: missing Resin identity key file: $XAI_RESIN_IDENTITY_KEY_FILE" >&2
+    exit 1
+  fi
+  chmod 600 "$XAI_RESIN_PROXY_TOKEN_FILE" "$XAI_RESIN_IDENTITY_KEY_FILE"
+  export XAI_RESIN_PROXY_TOKEN_FILE XAI_RESIN_IDENTITY_KEY_FILE
 fi
 
 if [[ ! -f "$ROOT_DIR/data/config.yaml" ]]; then
@@ -71,7 +92,17 @@ if [[ "${ENABLE_SPLIT_PROXY:-false}" == "true" ]]; then
 fi
 
 cd "$ROOT_DIR"
-docker compose "${COMPOSE_ARGS[@]}" pull
+case "$CLI_PROXY_IMAGE" in
+  cliproxyapi:*)
+    if ! docker image inspect "$CLI_PROXY_IMAGE" >/dev/null 2>&1; then
+      echo "error: missing local CLIProxyAPI image: $CLI_PROXY_IMAGE" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    docker compose "${COMPOSE_ARGS[@]}" pull
+    ;;
+esac
 docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans
 docker compose "${COMPOSE_ARGS[@]}" ps
 

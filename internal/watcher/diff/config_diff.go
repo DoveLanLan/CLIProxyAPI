@@ -81,6 +81,21 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.ProxyURL != newCfg.ProxyURL {
 		changes = append(changes, fmt.Sprintf("proxy-url: %s -> %s", formatProxyURL(oldCfg.ProxyURL), formatProxyURL(newCfg.ProxyURL)))
 	}
+	if oldCfg.XAIResinProxy.Enabled != newCfg.XAIResinProxy.Enabled {
+		changes = append(changes, fmt.Sprintf("xai-resin-proxy.enabled: %t -> %t", oldCfg.XAIResinProxy.Enabled, newCfg.XAIResinProxy.Enabled))
+	}
+	if oldCfg.XAIResinProxy.ProxyURL != newCfg.XAIResinProxy.ProxyURL {
+		changes = append(changes, fmt.Sprintf("xai-resin-proxy.proxy-url: %s -> %s", formatProxyURL(oldCfg.XAIResinProxy.ProxyURL), formatProxyURL(newCfg.XAIResinProxy.ProxyURL)))
+	}
+	if oldCfg.XAIResinProxy.Platform != newCfg.XAIResinProxy.Platform {
+		changes = append(changes, fmt.Sprintf("xai-resin-proxy.platform: %s -> %s", oldCfg.XAIResinProxy.Platform, newCfg.XAIResinProxy.Platform))
+	}
+	if oldCfg.XAIResinProxy.ProxyTokenFile != newCfg.XAIResinProxy.ProxyTokenFile {
+		changes = append(changes, "xai-resin-proxy.proxy-token-file: updated")
+	}
+	if oldCfg.XAIResinProxy.IdentityKeyFile != newCfg.XAIResinProxy.IdentityKeyFile {
+		changes = append(changes, "xai-resin-proxy.identity-key-file: updated")
+	}
 	if oldCfg.WebsocketAuth != newCfg.WebsocketAuth {
 		changes = append(changes, fmt.Sprintf("ws-auth: %t -> %t", oldCfg.WebsocketAuth, newCfg.WebsocketAuth))
 	}

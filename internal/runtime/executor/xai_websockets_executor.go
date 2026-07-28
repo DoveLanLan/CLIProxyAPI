@@ -1411,9 +1411,14 @@ func CloseXAIWebsocketSessionsForAuthID(authID string, reason string) {
 // when the downstream transport is websocket and the selected auth enables
 // websockets. Non-stream requests keep using the HTTP implementation.
 type XAIAutoExecutor struct {
-	httpExec  *XAIExecutor
-	wsExec    *XAIWebsocketsExecutor
-	proxyPool xaiProxyPoolClient
+	httpExec   *XAIExecutor
+	wsExec     *XAIWebsocketsExecutor
+	proxyPool  xaiProxyPoolClient
+	resinProxy xaiResinProxyRouter
+}
+
+type xaiResinProxyRouter interface {
+	ProxyURL(string) (string, bool, error)
 }
 
 type xaiProxyPoolClient interface {
@@ -1438,10 +1443,13 @@ type xaiProxyPoolClient interface {
 
 func NewXAIAutoExecutor(cfg *config.Config) *XAIAutoExecutor {
 	poolConfig := config.XAIProxyPoolConfig{}
+	resinConfig := config.XAIResinProxyConfig{}
 	if cfg != nil {
 		poolConfig = cfg.XAIProxyPool
+		resinConfig = cfg.XAIResinProxy
 	}
 	pool := helps.NewXAIProxyPool(poolConfig)
+	resinProxy := helps.NewXAIResinProxy(resinConfig, poolConfig.Enabled)
 	httpExec := NewXAIExecutor(cfg)
 	return &XAIAutoExecutor{
 		httpExec: httpExec,
@@ -1450,7 +1458,8 @@ func NewXAIAutoExecutor(cfg *config.Config) *XAIAutoExecutor {
 			store:       globalXAIWebsocketSessionStore,
 			idStore:     globalXAIWebsocketIDStates,
 		},
-		proxyPool: pool,
+		proxyPool:  pool,
+		resinProxy: resinProxy,
 	}
 }
 
@@ -1477,7 +1486,10 @@ func (e *XAIAutoExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Au
 	firstReq := req.Clone(nonNilXAIContext(ctx, req.Context()))
 	firstReq.Body = req.Body
 	resp, errDo := e.httpExec.HttpRequest(ctx, routed.auth, firstReq)
-	if !routed.used {
+	if routed.resinUsed {
+		return resp, requestScopeXAIProxyNetworkError(errDo)
+	}
+	if !routed.poolUsed {
 		return resp, errDo
 	}
 	if errDo != nil {

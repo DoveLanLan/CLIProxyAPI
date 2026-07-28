@@ -115,6 +115,18 @@ xai-proxy-pool:
   service-url: "http://egress-proxy-controller:8080"
   service-token-file: "/run/secrets/egress-proxy-api-token"
 
+# Optional xAI-only routing through a Resin forward proxy. Do not enable this
+# together with xai-proxy-pool. CPA derives a stable anonymous Resin Account for
+# every selected xAI auth, so large credential sets need only this one block.
+# Explicit auth proxy_url values still take precedence. The identity key is
+# CPA-only and must stay stable; rotating it creates new Resin Account bindings.
+xai-resin-proxy:
+  enabled: false
+  proxy-url: "http://resin:2260"
+  platform: "Default"
+  proxy-token-file: "/run/secrets/resin-proxy-token"
+  identity-key-file: "/run/secrets/resin-identity-key"
+
 # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
 force-model-prefix: false
 

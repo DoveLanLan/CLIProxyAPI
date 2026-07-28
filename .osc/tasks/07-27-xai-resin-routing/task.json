@@ -1,0 +1,14 @@
+{
+  "name": "Add native Resin routing for xAI",
+  "type": "feature",
+  "branch": "task/xai-resin-routing",
+  "priority": "P1",
+  "description": "Configure Resin once and derive stable per-auth xAI proxy identities at runtime.",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 4,
+  "next_action": [],
+  "completed_at": "2026-07-28T06:46:42+08:00",
+  "requires_change_workflow": true,
+  "change_workflow_status": "done"
+}

@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -90,6 +91,29 @@ func TestBuildConfigChangeDetails_NoChanges(t *testing.T) {
 	}
 	if details := BuildConfigChangeDetails(cfg, cfg); len(details) != 0 {
 		t.Fatalf("expected no change entries, got %v", details)
+	}
+}
+
+func TestBuildConfigChangeDetails_XAIResinProxyRedactsSecretFiles(t *testing.T) {
+	oldCfg := &config.Config{}
+	newCfg := &config.Config{XAIResinProxy: config.XAIResinProxyConfig{
+		Enabled:         true,
+		ProxyURL:        "http://resin:2260",
+		Platform:        "XAI",
+		ProxyTokenFile:  "/private/proxy-token",
+		IdentityKeyFile: "/private/identity-key",
+	}}
+
+	details := BuildConfigChangeDetails(oldCfg, newCfg)
+	expectContains(t, details, "xai-resin-proxy.enabled: false -> true")
+	expectContains(t, details, "xai-resin-proxy.proxy-url: <none> -> http://resin:2260")
+	expectContains(t, details, "xai-resin-proxy.platform:  -> XAI")
+	expectContains(t, details, "xai-resin-proxy.proxy-token-file: updated")
+	expectContains(t, details, "xai-resin-proxy.identity-key-file: updated")
+	for _, detail := range details {
+		if strings.Contains(detail, "/private/proxy-token") || strings.Contains(detail, "/private/identity-key") {
+			t.Fatalf("secret file path leaked: %q", detail)
+		}
 	}
 }
 
