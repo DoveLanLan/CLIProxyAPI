@@ -1,0 +1,14 @@
+{
+  "name": "Add xAI Resin request rotation and 402 retry",
+  "type": "feature",
+  "branch": "task/xai-resin-rotation-retry",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [],
+  "status": "done",
+  "current_phase": 0,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "completed_at": "2026-07-28T08:02:31Z"
+}

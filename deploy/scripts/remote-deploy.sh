@@ -18,10 +18,9 @@ if [[ ! -f "$ROOT_DIR/.env" && -f "$ROOT_DIR/.env.example" ]]; then
   cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
 fi
 
-if [[ -f "$ROOT_DIR/.env" ]]; then
-  # shellcheck disable=SC1091
-  source "$ROOT_DIR/.env"
-fi
+# shellcheck source=resolve-cli-proxy-image.sh
+source "$ROOT_DIR/scripts/resolve-cli-proxy-image.sh"
+resolve_cli_proxy_image "$ROOT_DIR/.env"
 
 if [[ "${ENABLE_SPLIT_PROXY:-false}" == "true" ]]; then
   COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.split-proxy.yml")
@@ -53,6 +52,16 @@ if [[ "${ENABLE_XAI_RESIN_PROXY:-false}" == "true" ]]; then
   COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.xai-resin.yml")
   XAI_RESIN_PROXY_TOKEN_FILE="${XAI_RESIN_PROXY_TOKEN_FILE:-/opt/resin/secrets/proxy-token}"
   XAI_RESIN_IDENTITY_KEY_FILE="${XAI_RESIN_IDENTITY_KEY_FILE:-/opt/cliproxyapi/secrets/resin-identity-key}"
+  XAI_RESIN_MAX_402_RETRIES="${XAI_RESIN_MAX_402_RETRIES:-0}"
+  if [[ ! "$XAI_RESIN_MAX_402_RETRIES" =~ ^[0-5]$ ]]; then
+    echo "error: XAI_RESIN_MAX_402_RETRIES must be an integer from 0 through 5" >&2
+    exit 1
+  fi
+  if (( XAI_RESIN_MAX_402_RETRIES > 0 )); then
+    XAI_RESIN_ADMIN_TOKEN_FILE="${XAI_RESIN_ADMIN_TOKEN_FILE:-/opt/resin/secrets/admin-token}"
+  else
+    XAI_RESIN_ADMIN_TOKEN_FILE="${XAI_RESIN_ADMIN_TOKEN_FILE:-/dev/null}"
+  fi
   if [[ ! -s "$XAI_RESIN_PROXY_TOKEN_FILE" ]]; then
     echo "error: missing Resin proxy token file: $XAI_RESIN_PROXY_TOKEN_FILE" >&2
     exit 1
@@ -61,8 +70,15 @@ if [[ "${ENABLE_XAI_RESIN_PROXY:-false}" == "true" ]]; then
     echo "error: missing Resin identity key file: $XAI_RESIN_IDENTITY_KEY_FILE" >&2
     exit 1
   fi
+  if (( XAI_RESIN_MAX_402_RETRIES > 0 )) && [[ ! -s "$XAI_RESIN_ADMIN_TOKEN_FILE" ]]; then
+    echo "error: missing Resin admin token file: $XAI_RESIN_ADMIN_TOKEN_FILE" >&2
+    exit 1
+  fi
   chmod 600 "$XAI_RESIN_PROXY_TOKEN_FILE" "$XAI_RESIN_IDENTITY_KEY_FILE"
-  export XAI_RESIN_PROXY_TOKEN_FILE XAI_RESIN_IDENTITY_KEY_FILE
+  if (( XAI_RESIN_MAX_402_RETRIES > 0 )); then
+    chmod 600 "$XAI_RESIN_ADMIN_TOKEN_FILE"
+  fi
+  export XAI_RESIN_PROXY_TOKEN_FILE XAI_RESIN_IDENTITY_KEY_FILE XAI_RESIN_ADMIN_TOKEN_FILE XAI_RESIN_MAX_402_RETRIES
 fi
 
 if [[ ! -f "$ROOT_DIR/data/config.yaml" ]]; then

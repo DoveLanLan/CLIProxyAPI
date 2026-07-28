@@ -22,6 +22,33 @@ type XAIAuth struct {
 	httpClient *http.Client
 }
 
+type xaiHTTPStatusError struct {
+	operation string
+	status    int
+	body      []byte
+}
+
+func (e *xaiHTTPStatusError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s failed with status %d: %s", e.operation, e.status, strings.TrimSpace(string(e.body)))
+}
+
+func (e *xaiHTTPStatusError) StatusCode() int {
+	if e == nil {
+		return 0
+	}
+	return e.status
+}
+
+func (e *xaiHTTPStatusError) ResponseBody() []byte {
+	if e == nil {
+		return nil
+	}
+	return append([]byte(nil), e.body...)
+}
+
 var xaiRefreshGroup singleflight.Group
 
 // NewXAIAuth creates an xAI OAuth helper using config proxy settings.
@@ -402,7 +429,7 @@ func (a *XAIAuth) postTokenForm(ctx context.Context, tokenEndpoint string, form 
 		return nil, fmt.Errorf("xai token response: read body: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("xai token request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &xaiHTTPStatusError{operation: "xai token request", status: resp.StatusCode, body: append([]byte(nil), body...)}
 	}
 	var payload struct {
 		AccessToken  string `json:"access_token"`

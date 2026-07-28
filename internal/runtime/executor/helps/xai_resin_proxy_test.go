@@ -1,12 +1,16 @@
 package helps
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -171,5 +175,193 @@ func TestXAIResinProxyRejectsReservedV1Values(t *testing.T) {
 				t.Fatalf("reserved route = %t, %v", routed, errRoute)
 			}
 		})
+	}
+}
+
+func TestXAIResinProxyRotatesLeaseThroughAuthenticatedAdminAPI(t *testing.T) {
+	const platformID = "11111111-1111-1111-1111-111111111111"
+	var listCalls atomic.Int32
+	var deleteCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer admin-secret" {
+			t.Errorf("Authorization = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/control/api/v1/platforms":
+			listCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + platformID + `","name":"Default"}],"total":1,"limit":100000,"offset":0}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/control/api/v1/platforms/"+platformID+"/leases/xai-f8e1567f5c2b26597c4c3e9bd47afa1b":
+			deleteCalls.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected admin request: %s %s", r.Method, r.URL.RequestURI())
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	proxy := newTestXAIResinProxy(t, func(cfg *config.XAIResinProxyConfig) {
+		adminTokenFile := filepath.Join(t.TempDir(), "admin-token")
+		if errWrite := os.WriteFile(adminTokenFile, []byte("admin-secret\n"), 0o600); errWrite != nil {
+			t.Fatalf("write admin token: %v", errWrite)
+		}
+		cfg.AdminURL = server.URL + "/control/"
+		cfg.AdminTokenFile = adminTokenFile
+		cfg.Max402Retries = 2
+	})
+	if got := proxy.Max402Retries(); got != 2 {
+		t.Fatalf("Max402Retries() = %d", got)
+	}
+	if generation := proxy.LeaseGeneration("auths/alice.json"); generation != 0 {
+		t.Fatalf("initial generation = %d", generation)
+	}
+	if errRotate := proxy.RotateLease(context.Background(), "auths/alice.json", 0); errRotate != nil {
+		t.Fatalf("RotateLease() error = %v", errRotate)
+	}
+	if generation := proxy.LeaseGeneration("auths/alice.json"); generation != 1 {
+		t.Fatalf("rotated generation = %d", generation)
+	}
+	if errRotate := proxy.RotateLease(context.Background(), "auths/alice.json", 0); errRotate != nil {
+		t.Fatalf("stale RotateLease() error = %v", errRotate)
+	}
+	if listCalls.Load() != 1 || deleteCalls.Load() != 1 {
+		t.Fatalf("admin calls = list:%d delete:%d", listCalls.Load(), deleteCalls.Load())
+	}
+}
+
+func TestXAIResinProxyCoalescesConcurrentLeaseRotation(t *testing.T) {
+	const platformID = "22222222-2222-2222-2222-222222222222"
+	var deleteCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + platformID + `","name":"Default"}]}`))
+			return
+		}
+		deleteCalls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	proxy := newTestXAIResinProxy(t, func(cfg *config.XAIResinProxyConfig) {
+		adminTokenFile := filepath.Join(t.TempDir(), "admin-token")
+		if errWrite := os.WriteFile(adminTokenFile, []byte("admin-secret"), 0o600); errWrite != nil {
+			t.Fatalf("write admin token: %v", errWrite)
+		}
+		cfg.AdminURL = server.URL
+		cfg.AdminTokenFile = adminTokenFile
+		cfg.Max402Retries = 2
+	})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 12)
+	for range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- proxy.RotateLease(context.Background(), "auth-concurrent", 0)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for errRotate := range errs {
+		if errRotate != nil {
+			t.Fatalf("RotateLease() error = %v", errRotate)
+		}
+	}
+	if deleteCalls.Load() != 1 || proxy.LeaseGeneration("auth-concurrent") != 1 {
+		t.Fatalf("delete calls/generation = %d/%d", deleteCalls.Load(), proxy.LeaseGeneration("auth-concurrent"))
+	}
+}
+
+func TestXAIResinProxyRefreshesCachedPlatformAfterNotFound(t *testing.T) {
+	const oldPlatformID = "33333333-3333-3333-3333-333333333333"
+	const newPlatformID = "44444444-4444-4444-4444-444444444444"
+	var listCalls atomic.Int32
+	var deleteCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			id := oldPlatformID
+			if listCalls.Add(1) > 1 {
+				id = newPlatformID
+			}
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + id + `","name":"Default"}]}`))
+		case http.MethodDelete:
+			deleteCalls.Add(1)
+			if strings.Contains(r.URL.Path, oldPlatformID) {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+
+	proxy := newTestXAIResinProxy(t, func(cfg *config.XAIResinProxyConfig) {
+		adminTokenFile := filepath.Join(t.TempDir(), "admin-token")
+		if errWrite := os.WriteFile(adminTokenFile, []byte("admin-secret"), 0o600); errWrite != nil {
+			t.Fatalf("write admin token: %v", errWrite)
+		}
+		cfg.AdminURL = server.URL
+		cfg.AdminTokenFile = adminTokenFile
+		cfg.Max402Retries = 1
+	})
+	if errRotate := proxy.RotateLease(context.Background(), "auth-platform-refresh", 0); errRotate != nil {
+		t.Fatalf("RotateLease() error = %v", errRotate)
+	}
+	if listCalls.Load() != 2 || deleteCalls.Load() != 2 {
+		t.Fatalf("admin calls = list:%d delete:%d", listCalls.Load(), deleteCalls.Load())
+	}
+}
+
+func TestXAIResinProxyRequiresAdminSecretsOnlyWhenRetriesEnabled(t *testing.T) {
+	proxy := newTestXAIResinProxy(t, nil)
+	if _, routed, errRoute := proxy.ProxyURL("auth-no-retry"); errRoute != nil || !routed {
+		t.Fatalf("proxy-only route = %t, %v", routed, errRoute)
+	}
+
+	proxy = newTestXAIResinProxy(t, func(cfg *config.XAIResinProxyConfig) {
+		cfg.AdminURL = "http://admin:secret@resin:2260"
+		cfg.AdminTokenFile = "/missing/admin-token"
+		cfg.Max402Retries = 2
+	})
+	_, routed, errRoute := proxy.ProxyURL("auth-retry")
+	if !routed || errRoute == nil || strings.Contains(errRoute.Error(), "admin:secret") {
+		t.Fatalf("invalid admin route = %t, %v", routed, errRoute)
+	}
+}
+
+func TestXAIResinProxyAdminFailureIsRequestScopedAndRedacted(t *testing.T) {
+	const leakedAccount = "xai-f8e1567f5c2b26597c4c3e9bd47afa1b"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"items":[{"id":"55555555-5555-5555-5555-555555555555","name":"Default"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"admin-secret ` + leakedAccount + `"}`))
+	}))
+	defer server.Close()
+
+	proxy := newTestXAIResinProxy(t, func(cfg *config.XAIResinProxyConfig) {
+		adminTokenFile := filepath.Join(t.TempDir(), "admin-token")
+		if errWrite := os.WriteFile(adminTokenFile, []byte("admin-secret"), 0o600); errWrite != nil {
+			t.Fatalf("write admin token: %v", errWrite)
+		}
+		cfg.AdminURL = server.URL
+		cfg.AdminTokenFile = adminTokenFile
+		cfg.Max402Retries = 1
+	})
+	errRotate := proxy.RotateLease(context.Background(), "auths/alice.json", 0)
+	var resinErr *XAIResinProxyError
+	if !errors.As(errRotate, &resinErr) || !resinErr.IsRequestScoped() || resinErr.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("rotation error = %#v", errRotate)
+	}
+	if strings.Contains(errRotate.Error(), "admin-secret") || strings.Contains(errRotate.Error(), leakedAccount) {
+		t.Fatalf("rotation error leaked secret data: %v", errRotate)
+	}
+	if generation := proxy.LeaseGeneration("auths/alice.json"); generation != 0 {
+		t.Fatalf("generation advanced after failed deletion: %d", generation)
 	}
 }

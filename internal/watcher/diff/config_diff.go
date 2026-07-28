@@ -96,6 +96,15 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.XAIResinProxy.IdentityKeyFile != newCfg.XAIResinProxy.IdentityKeyFile {
 		changes = append(changes, "xai-resin-proxy.identity-key-file: updated")
 	}
+	if oldCfg.XAIResinProxy.AdminURL != newCfg.XAIResinProxy.AdminURL {
+		changes = append(changes, fmt.Sprintf("xai-resin-proxy.admin-url: %s -> %s", formatProxyURL(oldCfg.XAIResinProxy.AdminURL), formatProxyURL(newCfg.XAIResinProxy.AdminURL)))
+	}
+	if oldCfg.XAIResinProxy.AdminTokenFile != newCfg.XAIResinProxy.AdminTokenFile {
+		changes = append(changes, "xai-resin-proxy.admin-token-file: updated")
+	}
+	if oldCfg.XAIResinProxy.Max402Retries != newCfg.XAIResinProxy.Max402Retries {
+		changes = append(changes, fmt.Sprintf("xai-resin-proxy.max-402-retries: %d -> %d", oldCfg.XAIResinProxy.Max402Retries, newCfg.XAIResinProxy.Max402Retries))
+	}
 	if oldCfg.WebsocketAuth != newCfg.WebsocketAuth {
 		changes = append(changes, fmt.Sprintf("ws-auth: %t -> %t", oldCfg.WebsocketAuth, newCfg.WebsocketAuth))
 	}

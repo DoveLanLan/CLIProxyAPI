@@ -263,6 +263,29 @@ func TestRefreshTokensPostsClientIDAndRefreshToken(t *testing.T) {
 	}
 }
 
+func TestRefreshTokensPreservesUpstreamHTTPStatusAndBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code":"personal-team-blocked:spending-limit","error":"blocked"}`))
+	}))
+	defer server.Close()
+
+	auth := NewXAIAuth(nil)
+	_, errRefresh := auth.RefreshTokens(context.Background(), "status-error-refresh-token", server.URL)
+	if errRefresh == nil {
+		t.Fatal("RefreshTokens() error = nil")
+	}
+	statusError, okStatus := errRefresh.(interface{ StatusCode() int })
+	if !okStatus || statusError.StatusCode() != http.StatusPaymentRequired {
+		t.Fatalf("status error = %#v", errRefresh)
+	}
+	bodyError, okBody := errRefresh.(interface{ ResponseBody() []byte })
+	if !okBody || !strings.Contains(string(bodyError.ResponseBody()), "personal-team-blocked:spending-limit") {
+		t.Fatalf("response body error = %#v", errRefresh)
+	}
+}
+
 func TestRefreshTokens_DeduplicatesConcurrentRefresh(t *testing.T) {
 	resetXAIRefreshGroupForTest()
 	t.Cleanup(resetXAIRefreshGroupForTest)

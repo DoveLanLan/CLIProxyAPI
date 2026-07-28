@@ -1014,7 +1014,10 @@ func xaiProxySessionTarget(auth *cliproxyauth.Auth) string {
 		return proxyURL
 	}
 	if route := strings.TrimSpace(auth.Attributes[xaiProxyRouteAttribute]); route != "" {
-		return proxyURL + "\x00" + route
+		proxyURL += "\x00" + route
+	}
+	if generation := strings.TrimSpace(auth.Attributes[xaiResinLeaseGenerationAttribute]); generation != "" {
+		proxyURL += "\x00resin:" + generation
 	}
 	return proxyURL
 }
@@ -1419,6 +1422,9 @@ type XAIAutoExecutor struct {
 
 type xaiResinProxyRouter interface {
 	ProxyURL(string) (string, bool, error)
+	Max402Retries() int
+	LeaseGeneration(string) uint64
+	RotateLease(context.Context, string, uint64) error
 }
 
 type xaiProxyPoolClient interface {
@@ -1483,25 +1489,12 @@ func (e *XAIAutoExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Au
 	if errRoute != nil {
 		return nil, errRoute
 	}
+	if routed.resinUsed {
+		return e.executeXAIResinHTTPRequest(ctx, auth, req, routed)
+	}
 	firstReq := req.Clone(nonNilXAIContext(ctx, req.Context()))
 	firstReq.Body = req.Body
 	resp, errDo := e.httpExec.HttpRequest(ctx, routed.auth, firstReq)
-	if routed.resinUsed {
-		if !shouldRetryXAIResinNetworkError(firstReq.Context(), errDo) {
-			return resp, requestScopeXAIProxyNetworkError(errDo)
-		}
-		if resp != nil && resp.Body != nil {
-			if errClose := resp.Body.Close(); errClose != nil {
-				log.WithError(errClose).Debug("xai Resin: close failed response before retry")
-			}
-		}
-		retryReq, errRetryReq := cloneReplayableXAIRequest(ctx, req)
-		if errRetryReq != nil {
-			return nil, requestScopeXAIProxyNetworkError(errDo)
-		}
-		retryResp, errRetry := e.httpExec.HttpRequest(ctx, routed.auth, retryReq)
-		return retryResp, requestScopeXAIProxyNetworkError(errRetry)
-	}
 	if !routed.poolUsed {
 		return resp, errDo
 	}
@@ -1530,6 +1523,91 @@ func (e *XAIAutoExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Au
 		return nil, errDo
 	}
 	return e.handleXAIProxyHTTPResponse(ctx, auth, req, routed.route, resp)
+}
+
+func (e *XAIAutoExecutor) executeXAIResinHTTPRequest(ctx context.Context, auth *cliproxyauth.Auth, req *http.Request, routed xaiProxyRoutedAuth) (*http.Response, error) {
+	networkRetried := false
+	resin402Retries := 0
+	attemptReq := req.Clone(nonNilXAIContext(ctx, req.Context()))
+	attemptReq.Body = req.Body
+	for {
+		resp, errDo := e.httpExec.HttpRequest(ctx, routed.auth, attemptReq)
+		if errDo != nil {
+			if !networkRetried && shouldRetryXAIResinNetworkError(attemptReq.Context(), errDo) {
+				retryReq, replayable := cloneReplayableXAIResinRequest(ctx, req)
+				if replayable {
+					closeXAIResinFailedResponse(resp)
+					networkRetried = true
+					attemptReq = retryReq
+					continue
+				}
+			}
+			return resp, requestScopeXAIResinError(errDo)
+		}
+
+		blocked, _, errInspect := responseIsXAIBlockedSpendingLimit(resp)
+		if errInspect != nil {
+			if resp != nil && resp.Body != nil {
+				if errClose := resp.Body.Close(); errClose != nil {
+					errInspect = errors.Join(errInspect, errClose)
+				}
+			}
+			return nil, errInspect
+		}
+		if !blocked || resin402Retries >= e.resinProxy.Max402Retries() {
+			return resp, nil
+		}
+
+		retryReq, replayable := cloneReplayableXAIResinRequest(ctx, req)
+		if !replayable {
+			return resp, nil
+		}
+		if errClose := resp.Body.Close(); errClose != nil {
+			if retryReq.Body != nil {
+				_ = retryReq.Body.Close()
+			}
+			return nil, fmt.Errorf("xai Resin proxy: close blocked response: %w", errClose)
+		}
+		var errRoute error
+		routed, errRoute = e.rotateXAIResinRoute(ctx, auth, routed)
+		if errRoute != nil {
+			if retryReq.Body != nil {
+				_ = retryReq.Body.Close()
+			}
+			return nil, errRoute
+		}
+		resin402Retries++
+		attemptReq = retryReq
+	}
+}
+
+func closeXAIResinFailedResponse(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	if errClose := resp.Body.Close(); errClose != nil {
+		log.WithError(errClose).Debug("xai Resin: close failed response before retry")
+	}
+}
+
+func cloneReplayableXAIResinRequest(ctx context.Context, req *http.Request) (*http.Request, bool) {
+	if req == nil {
+		return nil, false
+	}
+	cloned := req.Clone(nonNilXAIContext(ctx, req.Context()))
+	if req.Body == nil || req.Body == http.NoBody {
+		cloned.Body = req.Body
+		return cloned, true
+	}
+	if req.GetBody == nil {
+		return nil, false
+	}
+	body, errBody := req.GetBody()
+	if errBody != nil {
+		return nil, false
+	}
+	cloned.Body = body
+	return cloned, true
 }
 
 func (e *XAIAutoExecutor) handleXAIProxyHTTPResponse(ctx context.Context, auth *cliproxyauth.Auth, req *http.Request, route helps.XAIProxyRoute, resp *http.Response) (*http.Response, error) {

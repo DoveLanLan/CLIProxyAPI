@@ -120,12 +120,18 @@ xai-proxy-pool:
 # every selected xAI auth, so large credential sets need only this one block.
 # Explicit auth proxy_url values still take precedence. The identity key is
 # CPA-only and must stay stable; rotating it creates new Resin Account bindings.
+# A positive max-402-retries lets CPA delete this Account's Resin lease after
+# the exact personal-team-blocked:spending-limit 402, then retry the same auth
+# through a fresh Resin connection. Zero preserves the single-attempt behavior.
 xai-resin-proxy:
   enabled: false
   proxy-url: "http://resin:2260"
   platform: "Default"
   proxy-token-file: "/run/secrets/resin-proxy-token"
   identity-key-file: "/run/secrets/resin-identity-key"
+  admin-url: "http://resin:2260"
+  admin-token-file: "/run/secrets/resin-admin-token"
+  max-402-retries: 0
 
 # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
 force-model-prefix: false

@@ -2,6 +2,7 @@ package helps
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -47,12 +48,14 @@ func (e *XAIResinProxyError) ManagedHeaders() http.Header {
 // XAIResinProxy derives credentialed Resin forward-proxy URLs without exposing
 // raw CPA auth IDs or storing generated proxy credentials on auth records.
 type XAIResinProxy struct {
-	enabled     bool
-	baseURL     *url.URL
-	platform    string
-	proxyToken  string
-	identityKey []byte
-	initErr     error
+	enabled       bool
+	baseURL       *url.URL
+	platform      string
+	proxyToken    string
+	identityKey   []byte
+	max402Retries int
+	admin         *xaiResinAdminClient
+	initErr       error
 }
 
 // NewXAIResinProxy builds a fail-closed xAI Resin router. automaticRouteConflict
@@ -103,6 +106,20 @@ func NewXAIResinProxy(cfg config.XAIResinProxyConfig, automaticRouteConflict boo
 	proxy.platform = platform
 	proxy.proxyToken = proxyToken
 	proxy.identityKey = bytes.Clone(identityKey)
+	proxy.max402Retries = cfg.Max402Retries
+	if proxy.max402Retries < 0 {
+		proxy.max402Retries = 0
+	} else if proxy.max402Retries > 5 {
+		proxy.max402Retries = 5
+	}
+	if proxy.max402Retries > 0 {
+		admin, errAdmin := newXAIResinAdminClient(cfg, platform)
+		if errAdmin != nil {
+			proxy.initErr = errAdmin
+			return proxy
+		}
+		proxy.admin = admin
+	}
 	return proxy
 }
 
@@ -119,14 +136,65 @@ func (p *XAIResinProxy) ProxyURL(authID string) (string, bool, error) {
 		return "", true, resinUnavailable("xai Resin proxy requires a stable auth ID")
 	}
 
-	mac := hmac.New(sha256.New, p.identityKey)
-	_, _ = mac.Write([]byte(authID))
-	digest := mac.Sum(nil)
-	account := "xai-" + hex.EncodeToString(digest[:xaiResinAccountDigestBytes])
+	account, errAccount := p.accountForAuth(authID)
+	if errAccount != nil {
+		return "", true, errAccount
+	}
 
 	resolved := *p.baseURL
 	resolved.User = url.UserPassword(p.platform+"."+account, p.proxyToken)
 	return resolved.String(), true, nil
+}
+
+// Max402Retries returns the configured number of additional exact-402 attempts.
+func (p *XAIResinProxy) Max402Retries() int {
+	if p == nil || !p.enabled || p.initErr != nil {
+		return 0
+	}
+	return p.max402Retries
+}
+
+// LeaseGeneration identifies the current in-process Resin lease generation for
+// an auth without exposing the derived Account.
+func (p *XAIResinProxy) LeaseGeneration(authID string) uint64 {
+	if p == nil || p.admin == nil {
+		return 0
+	}
+	account, errAccount := p.accountForAuth(authID)
+	if errAccount != nil {
+		return 0
+	}
+	return p.admin.generation(account)
+}
+
+// RotateLease removes the deterministic Account lease if the caller still
+// observes the current generation. Concurrent requests for the same Account are
+// coalesced so one upstream 402 burst does not repeatedly delete a fresh lease.
+func (p *XAIResinProxy) RotateLease(ctx context.Context, authID string, observedGeneration uint64) error {
+	if p == nil || !p.enabled || p.max402Retries <= 0 || p.admin == nil {
+		return resinUnavailable("xai Resin lease rotation is unavailable")
+	}
+	if p.initErr != nil {
+		return p.initErr
+	}
+	account, errAccount := p.accountForAuth(authID)
+	if errAccount != nil {
+		return errAccount
+	}
+	if errRotate := p.admin.rotateLease(ctx, account, observedGeneration); errRotate != nil {
+		return resinUnavailable("xai Resin lease rotation failed")
+	}
+	return nil
+}
+
+func (p *XAIResinProxy) accountForAuth(authID string) (string, error) {
+	if p == nil || strings.TrimSpace(authID) == "" {
+		return "", resinUnavailable("xai Resin proxy requires a stable auth ID")
+	}
+	mac := hmac.New(sha256.New, p.identityKey)
+	_, _ = mac.Write([]byte(authID))
+	digest := mac.Sum(nil)
+	return "xai-" + hex.EncodeToString(digest[:xaiResinAccountDigestBytes]), nil
 }
 
 func parseXAIResinProxyURL(raw string) (*url.URL, error) {

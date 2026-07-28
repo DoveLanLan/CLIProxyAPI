@@ -378,6 +378,9 @@ type XAIResinProxyConfig struct {
 	Platform        string `yaml:"platform" json:"platform"`
 	ProxyTokenFile  string `yaml:"proxy-token-file" json:"proxy-token-file"`
 	IdentityKeyFile string `yaml:"identity-key-file" json:"identity-key-file"`
+	AdminURL        string `yaml:"admin-url" json:"admin-url"`
+	AdminTokenFile  string `yaml:"admin-token-file" json:"admin-token-file"`
+	Max402Retries   int    `yaml:"max-402-retries" json:"max-402-retries"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
@@ -1107,6 +1110,29 @@ func (cfg *Config) SanitizeXAIResinProxy() {
 	}
 	resin.ProxyTokenFile = strings.TrimSpace(resin.ProxyTokenFile)
 	resin.IdentityKeyFile = strings.TrimSpace(resin.IdentityKeyFile)
+	resin.AdminURL = normalizeXAIResinAdminURL(resin.AdminURL)
+	resin.AdminTokenFile = strings.TrimSpace(resin.AdminTokenFile)
+	if resin.Max402Retries < 0 {
+		resin.Max402Retries = 0
+	} else if resin.Max402Retries > 5 {
+		resin.Max402Retries = 5
+	}
+}
+
+func normalizeXAIResinAdminURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, errParse := url.Parse(raw)
+	if errParse != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		parsed.Path = strings.TrimRight(parsed.Path, "/")
+		parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
+		return parsed.String()
+	default:
+		return ""
+	}
 }
 
 func normalizeForwardProxyURL(raw string) string {
