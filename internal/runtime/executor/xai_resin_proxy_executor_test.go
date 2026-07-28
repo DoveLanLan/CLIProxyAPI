@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -230,21 +231,71 @@ func TestXAIResinNetworkFailureIsRequestScopedWithoutEgressFallback(t *testing.T
 		proxyPool:  pool,
 		resinProxy: &executorResinProxy{proxyURL: "http://Default.xai-account:token@resin:2260"},
 	}
+	attempts := 0
 	_, errExecute := executeXAIWithProxyPool(context.Background(), exec, &cliproxyauth.Auth{ID: "auth-network", Provider: "xai"}, func(*cliproxyauth.Auth) (string, error) {
+		attempts++
 		return "", io.ErrUnexpectedEOF
 	})
 	requestScoped, ok := errExecute.(interface{ IsRequestScoped() bool })
 	if !ok || !requestScoped.IsRequestScoped() || !errors.Is(errExecute, io.ErrUnexpectedEOF) {
 		t.Fatalf("network error = %#v", errExecute)
 	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
 	if status := controller.Status(context.Background()); status.Counters.Requests != 0 {
 		t.Fatalf("Egress fallback occurred: %#v", status.Counters)
 	}
 }
 
+func TestXAIResinNetworkFailureRetriesSameAuth(t *testing.T) {
+	pool, _, controller := newExecutorProxyPool(t)
+	exec := &XAIAutoExecutor{
+		proxyPool:  pool,
+		resinProxy: &executorResinProxy{proxyURL: "http://Default.xai-account:token@resin:2260"},
+	}
+	original := &cliproxyauth.Auth{ID: "auth-retry", Provider: "xai"}
+	attempts := make([]*cliproxyauth.Auth, 0, 2)
+	result, errExecute := executeXAIWithProxyPool(context.Background(), exec, original, func(attemptAuth *cliproxyauth.Auth) (string, error) {
+		attempts = append(attempts, attemptAuth)
+		if len(attempts) == 1 {
+			return "", io.ErrUnexpectedEOF
+		}
+		return "ok", nil
+	})
+	if errExecute != nil || result != "ok" {
+		t.Fatalf("result/error = %q, %v", result, errExecute)
+	}
+	if len(attempts) != 2 || attempts[0] != attempts[1] || attempts[0] == original {
+		t.Fatalf("attempt auths = %#v, want same routed clone twice", attempts)
+	}
+	if attempts[0].ProxyURL != "http://Default.xai-account:token@resin:2260" {
+		t.Fatalf("retry proxy URL = %q", attempts[0].ProxyURL)
+	}
+	if status := controller.Status(context.Background()); status.Counters.Requests != 0 {
+		t.Fatalf("Egress fallback occurred: %#v", status.Counters)
+	}
+}
+
+func TestXAIResinCanceledContextDoesNotRetry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	exec := &XAIAutoExecutor{resinProxy: &executorResinProxy{proxyURL: "http://Default.xai-account:token@resin:2260"}}
+	attempts := 0
+	_, errExecute := executeXAIWithProxyPool(ctx, exec, &cliproxyauth.Auth{ID: "auth-canceled", Provider: "xai"}, func(*cliproxyauth.Auth) (string, error) {
+		attempts++
+		return "", context.DeadlineExceeded
+	})
+	if attempts != 1 || !errors.Is(errExecute, context.DeadlineExceeded) {
+		t.Fatalf("attempts/error = %d, %v", attempts, errExecute)
+	}
+}
+
 func TestXAIResinStreamNetworkFailureIsRequestScoped(t *testing.T) {
 	exec := &XAIAutoExecutor{resinProxy: &executorResinProxy{proxyURL: "http://Default.xai-account:token@resin:2260"}}
+	attempts := 0
 	stream, errStream := exec.executeStreamWithProxyPool(context.Background(), &cliproxyauth.Auth{ID: "auth-stream", Provider: "xai"}, func(*cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error) {
+		attempts++
 		chunks := make(chan cliproxyexecutor.StreamChunk, 1)
 		chunks <- cliproxyexecutor.StreamChunk{Err: io.ErrUnexpectedEOF}
 		close(chunks)
@@ -257,5 +308,80 @@ func TestXAIResinStreamNetworkFailureIsRequestScoped(t *testing.T) {
 	requestScoped, ok := chunk.Err.(interface{ IsRequestScoped() bool })
 	if !ok || !requestScoped.IsRequestScoped() || !errors.Is(chunk.Err, io.ErrUnexpectedEOF) {
 		t.Fatalf("stream network error = %#v", chunk.Err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestXAIResinStreamBootstrapFailureRetriesBeforePayload(t *testing.T) {
+	exec := &XAIAutoExecutor{resinProxy: &executorResinProxy{proxyURL: "http://Default.xai-account:token@resin:2260"}}
+	attempts := 0
+	stream, errStream := exec.executeStreamWithProxyPool(context.Background(), &cliproxyauth.Auth{ID: "auth-stream-retry", Provider: "xai"}, func(*cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error) {
+		attempts++
+		chunks := make(chan cliproxyexecutor.StreamChunk, 1)
+		if attempts == 1 {
+			chunks <- cliproxyexecutor.StreamChunk{Err: io.ErrUnexpectedEOF}
+		} else {
+			chunks <- cliproxyexecutor.StreamChunk{Payload: []byte("ok")}
+		}
+		close(chunks)
+		return &cliproxyexecutor.StreamResult{Chunks: chunks}, nil
+	})
+	if errStream != nil {
+		t.Fatalf("executeStreamWithProxyPool() error = %v", errStream)
+	}
+	chunk := <-stream.Chunks
+	if attempts != 2 || chunk.Err != nil || string(chunk.Payload) != "ok" {
+		t.Fatalf("attempts/chunk = %d, %#v", attempts, chunk)
+	}
+}
+
+func TestXAIResinStreamMidResponseFailureDoesNotRetry(t *testing.T) {
+	exec := &XAIAutoExecutor{resinProxy: &executorResinProxy{proxyURL: "http://Default.xai-account:token@resin:2260"}}
+	attempts := 0
+	stream, errStream := exec.executeStreamWithProxyPool(context.Background(), &cliproxyauth.Auth{ID: "auth-stream-mid", Provider: "xai"}, func(*cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error) {
+		attempts++
+		chunks := make(chan cliproxyexecutor.StreamChunk, 2)
+		chunks <- cliproxyexecutor.StreamChunk{Payload: []byte("started")}
+		chunks <- cliproxyexecutor.StreamChunk{Err: io.ErrUnexpectedEOF}
+		close(chunks)
+		return &cliproxyexecutor.StreamResult{Chunks: chunks}, nil
+	})
+	if errStream != nil {
+		t.Fatalf("executeStreamWithProxyPool() error = %v", errStream)
+	}
+	first := <-stream.Chunks
+	second := <-stream.Chunks
+	requestScoped, ok := second.Err.(interface{ IsRequestScoped() bool })
+	if attempts != 1 || string(first.Payload) != "started" || !ok || !requestScoped.IsRequestScoped() || !errors.Is(second.Err, io.ErrUnexpectedEOF) {
+		t.Fatalf("attempts/chunks = %d, %#v, %#v", attempts, first, second)
+	}
+}
+
+func TestXAIResinHttpRequestRetriesProxyConnectFailureOnce(t *testing.T) {
+	var attempts atomic.Int32
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+	}))
+	defer proxyServer.Close()
+	proxyURL, errParse := url.Parse(proxyServer.URL)
+	if errParse != nil {
+		t.Fatalf("parse proxy URL: %v", errParse)
+	}
+	proxyURL.User = url.UserPassword("Default.xai-account", "resin-token")
+	exec := &XAIAutoExecutor{
+		httpExec:   NewXAIExecutor(&config.Config{}),
+		resinProxy: &executorResinProxy{proxyURL: proxyURL.String()},
+	}
+	req, errRequest := http.NewRequest(http.MethodGet, "https://upstream.invalid/v1/models", nil)
+	if errRequest != nil {
+		t.Fatalf("create request: %v", errRequest)
+	}
+	_, errDo := exec.HttpRequest(context.Background(), &cliproxyauth.Auth{ID: "auth-http-retry", Provider: "xai"}, req)
+	requestScoped, ok := errDo.(interface{ IsRequestScoped() bool })
+	if attempts.Load() != 2 || !ok || !requestScoped.IsRequestScoped() {
+		t.Fatalf("attempts/error = %d, %#v", attempts.Load(), errDo)
 	}
 }

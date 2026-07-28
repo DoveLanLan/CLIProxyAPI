@@ -56,10 +56,24 @@ The existing `XAIAutoExecutor` wrappers must route:
 Derived proxy data is transient. Refresh results restore the original persisted
 auth proxy and remove transient route attributes.
 
-Resin transport-level network failures are request-scoped across HTTP, stream,
-WebSocket, and refresh paths. They must not cool a valid xAI credential, retry
-through unrelated credentials, invoke EgressProxyPool, or fall back to the CPA
-global proxy.
+Resin transport-level network failures are retried once with the same selected
+xAI auth and the same derived Resin Account when replay is safe and no response
+payload has been exposed downstream. Resin synchronously invalidates the failed
+lease, so this second connection is allocated to a replacement node. If that
+single replay also fails, the final failure is request-scoped across HTTP,
+stream, WebSocket, and refresh paths. These failures must not cool a valid xAI
+credential, retry through unrelated credentials, invoke EgressProxyPool, or
+fall back to the CPA global proxy.
+
+The replay contract is intentionally narrow:
+
+- non-streaming executor requests and refreshes may replay once after a network
+  error;
+- generic HTTP requests replay only when the request body is replayable;
+- streaming and WebSocket requests replay only before their first non-empty
+  payload; mid-response failures remain request-scoped and are not replayed;
+- upstream HTTP statuses, exact spending-limit 402 responses, configuration
+  failures, caller cancellation, and client request errors are not replayed.
 
 ## Error behavior
 
@@ -87,5 +101,8 @@ when xAI returns an exact spending-limit 402.
   registry pull. Registry-qualified release images retain normal pull behavior.
 - Verify container health, Resin forward proxy authentication, CPA startup,
   dynamic xAI Account creation, and one real CPA xAI request.
+- Verify a production Resin node failure opens the node circuit at failure count
+  one, rotates the same Account lease, and is recovered by CPA's single internal
+  replay without returning the first proxy 502 downstream.
 - On any failed verification, restore the previous CPA files/image/config and
   leave Resin data intact.

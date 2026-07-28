@@ -18,3 +18,9 @@
 - [x] Deploy a CPA image containing the reviewed Resin integration.
 - [x] Verify the real CPA -> Resin -> xAI network path and classify the upstream 402 response.
 - [x] Record the live rollout result and final production rollback point.
+- [x] Add one safe same-auth retry for pre-response Resin network failures.
+- [x] Cover non-streaming success, repeated failure, stream bootstrap replay,
+      mid-stream no-replay, cancellation, and no-Egress-fallback behavior.
+- [x] Re-run formatting, focused/full tests, race tests, vet, and server build.
+- [x] Redeploy CPA and verify a forced first Resin failure is hidden by the
+      same-Account retry in production.

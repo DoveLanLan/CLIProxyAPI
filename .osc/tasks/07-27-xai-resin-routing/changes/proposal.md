@@ -15,6 +15,11 @@ the xAI auto executor derives `xai-<HMAC(identity-key, auth-id)>`, clones the
 selected auth in memory, and installs a credentialed Resin proxy URL on the
 clone. Existing provider transports then apply it uniformly.
 
+After production rollout, add one same-auth retry for a Resin transport failure
+that occurs before any response payload is exposed downstream. Resin invalidates
+the failed Account lease synchronously, so rebuilding the request with the same
+derived identity reaches the replacement node without switching xAI credentials.
+
 ## Compatibility
 
 - Disabled by default.
@@ -23,6 +28,8 @@ clone. Existing provider transports then apply it uniformly.
 - Existing EgressProxyPool support remains, but simultaneous enablement fails
   closed instead of choosing an ambiguous backend.
 - No public API or translator changes.
+- The retry is internal, limited to one replay, and never selects another auth,
+  EgressProxyPool route, or CPA global proxy.
 
 ## Security
 

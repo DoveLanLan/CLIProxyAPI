@@ -1487,7 +1487,20 @@ func (e *XAIAutoExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Au
 	firstReq.Body = req.Body
 	resp, errDo := e.httpExec.HttpRequest(ctx, routed.auth, firstReq)
 	if routed.resinUsed {
-		return resp, requestScopeXAIProxyNetworkError(errDo)
+		if !shouldRetryXAIResinNetworkError(firstReq.Context(), errDo) {
+			return resp, requestScopeXAIProxyNetworkError(errDo)
+		}
+		if resp != nil && resp.Body != nil {
+			if errClose := resp.Body.Close(); errClose != nil {
+				log.WithError(errClose).Debug("xai Resin: close failed response before retry")
+			}
+		}
+		retryReq, errRetryReq := cloneReplayableXAIRequest(ctx, req)
+		if errRetryReq != nil {
+			return nil, requestScopeXAIProxyNetworkError(errDo)
+		}
+		retryResp, errRetry := e.httpExec.HttpRequest(ctx, routed.auth, retryReq)
+		return retryResp, requestScopeXAIProxyNetworkError(errRetry)
 	}
 	if !routed.poolUsed {
 		return resp, errDo

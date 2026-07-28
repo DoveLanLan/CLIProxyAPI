@@ -114,7 +114,11 @@ func executeXAIWithProxyPool[T any](ctx context.Context, e *XAIAutoExecutor, aut
 	}
 	result, errRun := run(routed.auth)
 	if routed.resinUsed {
-		return result, requestScopeXAIProxyNetworkError(errRun)
+		if !shouldRetryXAIResinNetworkError(ctx, errRun) {
+			return result, requestScopeXAIProxyNetworkError(errRun)
+		}
+		retryResult, errRetry := run(routed.auth)
+		return retryResult, requestScopeXAIProxyNetworkError(errRetry)
 	}
 	if !routed.poolUsed || errRun == nil {
 		return result, errRun
@@ -170,16 +174,56 @@ func (e *XAIAutoExecutor) executeStreamWithProxyPool(ctx context.Context, auth *
 		return nil, errRoute
 	}
 	if routed.resinUsed {
-		stream, errRun := run(routed.auth)
-		if errRun != nil {
-			return nil, requestScopeXAIProxyNetworkError(errRun)
-		}
-		return wrapXAIResinStream(ctx, stream), nil
+		return executeXAIResinStream(ctx, routed.auth, run)
 	}
 	if !routed.poolUsed {
 		return run(routed.auth)
 	}
 	return e.executeRoutedXAIStream(ctx, auth, routed.auth, routed.route, run, true)
+}
+
+func executeXAIResinStream(
+	ctx context.Context,
+	auth *cliproxyauth.Auth,
+	run func(*cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error),
+) (*cliproxyexecutor.StreamResult, error) {
+	stream, errRun := run(auth)
+	if errRun != nil {
+		if !shouldRetryXAIResinNetworkError(ctx, errRun) {
+			return nil, requestScopeXAIProxyNetworkError(errRun)
+		}
+		stream, errRun = run(auth)
+		if errRun != nil {
+			return nil, requestScopeXAIProxyNetworkError(errRun)
+		}
+		return bootstrapXAIResinStream(ctx, stream, false, auth, run)
+	}
+	return bootstrapXAIResinStream(ctx, stream, true, auth, run)
+}
+
+func bootstrapXAIResinStream(
+	ctx context.Context,
+	stream *cliproxyexecutor.StreamResult,
+	allowRetry bool,
+	auth *cliproxyauth.Auth,
+	run func(*cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error),
+) (*cliproxyexecutor.StreamResult, error) {
+	if stream == nil || stream.Chunks == nil {
+		return stream, nil
+	}
+	buffered, closed, bootstrapErr := readXAIProxyStreamBootstrap(ctx, stream)
+	if bootstrapErr == nil {
+		return wrapXAIResinStream(ctx, stream, buffered, closed), nil
+	}
+	if !allowRetry || !shouldRetryXAIResinNetworkError(ctx, bootstrapErr) {
+		return xaiStreamErrorResult(stream.Headers, requestScopeXAIProxyNetworkError(bootstrapErr)), nil
+	}
+	drainXAIProxyStream(stream)
+	retryStream, errRetry := run(auth)
+	if errRetry != nil {
+		return nil, requestScopeXAIProxyNetworkError(errRetry)
+	}
+	return bootstrapXAIResinStream(ctx, retryStream, false, auth, run)
 }
 
 func (e *XAIAutoExecutor) executeRoutedXAIStream(ctx context.Context, auth *cliproxyauth.Auth, attemptAuth *cliproxyauth.Auth, route helps.XAIProxyRoute, run func(*cliproxyauth.Auth) (*cliproxyexecutor.StreamResult, error), allowNetworkRetry bool) (*cliproxyexecutor.StreamResult, error) {
@@ -330,24 +374,44 @@ func wrapXAIProxyStream(ctx context.Context, pool xaiProxyPoolClient, route help
 	return &cliproxyexecutor.StreamResult{Headers: headers, Chunks: out}
 }
 
-func wrapXAIResinStream(ctx context.Context, stream *cliproxyexecutor.StreamResult) *cliproxyexecutor.StreamResult {
+func wrapXAIResinStream(
+	ctx context.Context,
+	stream *cliproxyexecutor.StreamResult,
+	buffered []cliproxyexecutor.StreamChunk,
+	closed bool,
+) *cliproxyexecutor.StreamResult {
 	if stream == nil || stream.Chunks == nil {
 		return stream
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)
-		for chunk := range stream.Chunks {
+		emit := func(chunk cliproxyexecutor.StreamChunk) bool {
 			chunk.Err = requestScopeXAIProxyNetworkError(chunk.Err)
 			if ctx == nil {
 				out <- chunk
-				continue
+				return true
 			}
 			select {
 			case <-ctx.Done():
+				return false
+			case out <- chunk:
+				return true
+			}
+		}
+		for _, chunk := range buffered {
+			if !emit(chunk) {
 				drainXAIProxyStream(stream)
 				return
-			case out <- chunk:
+			}
+		}
+		if closed {
+			return
+		}
+		for chunk := range stream.Chunks {
+			if !emit(chunk) {
+				drainXAIProxyStream(stream)
+				return
 			}
 		}
 	}()
@@ -356,6 +420,13 @@ func wrapXAIResinStream(ctx context.Context, stream *cliproxyexecutor.StreamResu
 		headers = stream.Headers.Clone()
 	}
 	return &cliproxyexecutor.StreamResult{Headers: headers, Chunks: out}
+}
+
+func xaiStreamErrorResult(headers http.Header, err error) *cliproxyexecutor.StreamResult {
+	chunks := make(chan cliproxyexecutor.StreamChunk, 1)
+	chunks <- cliproxyexecutor.StreamChunk{Err: err}
+	close(chunks)
+	return &cliproxyexecutor.StreamResult{Headers: headers.Clone(), Chunks: chunks}
 }
 
 func drainXAIProxyStream(stream *cliproxyexecutor.StreamResult) {
@@ -418,6 +489,13 @@ func requestScopeXAIProxyNetworkError(err error) error {
 		return err
 	}
 	return &xaiProxyRequestScopedNetworkError{cause: err}
+}
+
+func shouldRetryXAIResinNetworkError(ctx context.Context, err error) bool {
+	if !isXAIProxyNetworkError(err) {
+		return false
+	}
+	return ctx == nil || ctx.Err() == nil
 }
 
 func cloneReplayableXAIRequest(ctx context.Context, req *http.Request) (*http.Request, error) {

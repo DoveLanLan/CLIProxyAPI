@@ -12,6 +12,10 @@
 - [x] Simultaneous automatic backends fail closed and deployment flags are rejected.
 - [x] HTTP sends the expected Resin Basic proxy authentication.
 - [x] SSE and WebSocket network failures remain request-scoped.
+- [x] A pre-response Resin network failure retries exactly once with the same routed auth and derived Account.
+- [x] Repeated Resin failures remain request-scoped after two total attempts.
+- [x] Stream bootstrap failures replay before the first payload; mid-stream failures do not replay.
+- [x] Caller cancellation prevents the internal Resin replay.
 - [x] Different xAI auths produce different WebSocket proxy session targets.
 - [x] OAuth refresh uses Resin after an auth ID exists and restores the persisted proxy.
 - [x] Exact xAI spending-limit 402 does not invoke the EgressProxyPool probe flow.
@@ -30,3 +34,9 @@
 - [x] All 1,291 enabled xAI credentials were checked exactly once through their derived Resin Accounts.
 - [x] Every expected enabled-credential Account exists in Resin; zero are missing and zero xAI Account names are malformed.
 - [x] No enabled credential returned 200: 1,283 returned spending-limit 402 and 8 retained 401 tokens.
+- [x] Follow-up CPA image `cliproxyapi:xai-resin-retry-20260728` is running and its HTTP endpoint returns 200.
+- [x] Scoped production fault injection hit one Resin node connection and produced `connect_dial` HTTP 502 internally.
+- [x] The failed node opened its circuit at failure count one and the same Account moved to a different node.
+- [x] CPA hid the first Resin 502; the client wrapper and xAI upstream both returned HTTP 200.
+- [x] The temporary fault rule was removed and the intentionally failed node recovered through a successful probe.
+- [x] Twenty consecutive real `grok-4.5` requests returned 20 HTTP 200 responses and zero HTTP 502 responses.

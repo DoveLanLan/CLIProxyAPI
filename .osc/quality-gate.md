@@ -10,6 +10,7 @@ Status: PASS with one pre-existing unrelated race-test finding
 - Runtime HMAC identity and credentialed forward-proxy URL helper.
 - xAI HTTP, SSE, WebSocket, Management HTTP, and refresh routing integration.
 - Request-scoped Resin configuration and transport errors.
+- One safe same-auth/same-Account replay for pre-response Resin network errors.
 - Redacted config change reporting, production overlay, deploy validation, and
   Chinese two-project setup documentation.
 - No changes under `internal/translator/**`.
@@ -29,6 +30,12 @@ Status: PASS with one pre-existing unrelated race-test finding
 | Base + Resin overlay `docker compose ... config` | PASS |
 | `git diff --check` | PASS |
 | `git diff --name-only -- internal/translator` is empty | PASS |
+
+The follow-up failover change re-ran `gofmt -w .`,
+`go test ./internal/runtime/executor -run 'Resin' -count=1`,
+`go test -race -run 'Resin' ./internal/runtime/executor -count=1`,
+`go vet ./internal/runtime/executor`, `go test ./...`, the required server
+build, both diff guards, and all passed.
 
 ## Security and compatibility review
 
@@ -70,6 +77,19 @@ Status: PASS with one pre-existing unrelated race-test finding
   active.
 - PASS: a manual inspection run with zero runtime xAI auths completed
   successfully and applied no credential action.
+- PASS: `cliproxyapi:xai-resin-retry-20260728` is running on `bytevirt`; CPA
+  returns HTTP 200 and Resin is healthy.
+- PASS: a scoped production fault rejected exactly one connection from a leased
+  Resin node. Resin emitted an internal `connect_dial` 502, opened the old node
+  at failure count one, and rotated the same Account to another node.
+- PASS: CPA's same-auth retry hid that first 502; the management client and xAI
+  upstream both returned HTTP 200.
+- PASS: all temporary fault rules were removed and a successful egress probe
+  restored the intentionally failed node.
+- PASS: 20 consecutive real `grok-4.5` requests returned HTTP 200; HTTP 502
+  count was zero and mean duration was 3.665 seconds.
+- PASS: the follow-up rollback point is present at
+  `/opt/cliproxyapi/backups/xai-resin-retry-20260728T121546Z`.
 
 ## Pre-existing race finding
 
