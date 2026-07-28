@@ -86,3 +86,28 @@ file watcher to remove those runtime auths and the built-in auto-refresh loop to
 unschedule them. The systemd timer itself would remain active, but would have no
 xAI candidates until a new credential is added. The backup operation did not
 move the files, so current routing and polling remain unchanged.
+
+## Credential evacuation
+
+After operator confirmation, all 4,828 xAI files were evacuated from CPA's
+active auth directory. CPA and the inspection timer were stopped during the
+move so neither auto-refresh nor inspection could recreate or mutate a file
+mid-migration.
+
+- Active auth-directory xAI files after restart: 0
+- Runtime xAI auth entries after restart: 0
+- Evacuated xAI files: 4,828
+- Unrelated auth files retained in the active directory: 17
+- Individual-file quarantine:
+  `/var/backups/cliproxyapi/xai-auths-20260728T010747Z/migrated-auths`
+- Exact post-migration archive:
+  `/var/backups/cliproxyapi/xai-auths-20260728T010747Z/xai-auths-migrated-current.tar.gz`
+- Post-migration archive SHA-256:
+  `46746ea451873c574f00274c2ba0284ea00526602a4070e3a75a3f57964abec3`
+- Post-migration archive count and integrity check: 4,828, pass
+
+CPA returned HTTP 200 after restart. `grok-inspection.timer` was restored to
+active state, and a manual zero-runtime-xAI inspection completed successfully
+with no disable or recovery action. A subsequent source/runtime check remained
+at zero, so only credentials registered after this evacuation can enter the
+active xAI pool.

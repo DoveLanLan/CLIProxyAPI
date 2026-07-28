@@ -62,6 +62,14 @@ Status: PASS with one pre-existing unrelated race-test finding
 - UPSTREAM CREDENTIAL RESULT: no enabled credential completed `grok-3-mini`
   with HTTP 200. The final unique-credential results were 1,283 xAI
   spending-limit 402 responses and 8 current-token 401 responses.
+- PASS: after operator-confirmed evacuation, all 4,828 xAI credential files are
+  outside the active auth directory; both source and runtime xAI counts are
+  zero while all 17 unrelated auth files remain active.
+- PASS: the exact post-migration archive contains 4,828 files and passes its
+  SHA-256 check; CPA is HTTP 200 and the five-minute inspection timer remains
+  active.
+- PASS: a manual inspection run with zero runtime xAI auths completed
+  successfully and applied no credential action.
 
 ## Pre-existing race finding
 
