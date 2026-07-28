@@ -111,3 +111,18 @@ active state, and a manual zero-runtime-xAI inspection completed successfully
 with no disable or recovery action. A subsequent source/runtime check remained
 at zero, so only credentials registered after this evacuation can enter the
 active xAI pool.
+
+## Temporary inspection pause
+
+At operator request, `grok-inspection.timer` was stopped and disabled to rule
+out five-minute inspection traffic as a source of excessive IP requests. The
+oneshot `grok-inspection.service` is inactive and no next timer trigger is
+scheduled. CPA remained HTTP 200, Resin remained healthy, and the active xAI
+credential count remained zero.
+
+The unit files and configuration were retained. Restore periodic inspection
+when required with:
+
+```bash
+systemctl enable --now grok-inspection.timer
+```
