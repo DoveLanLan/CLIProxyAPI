@@ -24,3 +24,16 @@
 - [x] Re-run formatting, focused/full tests, race tests, vet, and server build.
 - [x] Redeploy CPA and verify a forced first Resin failure is hidden by the
       same-Account retry in production.
+- [ ] Merge the remote exact-402 lease-rotation implementation with the local
+      pre-response network retry without losing either retry contract.
+- [ ] Fix CPA deploy image precedence and add a shell regression test for
+      explicit workflow images and `.env` fallback.
+- [ ] Re-run CPA formatting, focused tests, race, vet, full tests, server build,
+      deploy-script tests, and diff guards.
+- [ ] Re-run Resin full tests, focused race tests, build, and diff guard.
+- [ ] Push Resin `master`, wait for both Actions workflows, and verify the VPS
+      runs its immutable GHCR SHA image healthy.
+- [ ] Push CPA `main`, wait for both Actions workflows, and verify the VPS runs
+      its immutable GHCR SHA image with all Resin configuration mounts.
+- [ ] Re-run controlled same-Account failover and `grok-4.5` stability checks,
+      then remove the temporary local image tags from the VPS.

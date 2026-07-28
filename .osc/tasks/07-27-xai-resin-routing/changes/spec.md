@@ -75,6 +75,13 @@ The replay contract is intentionally narrow:
 - upstream HTTP statuses, exact spending-limit 402 responses, configuration
   failures, caller cancellation, and client request errors are not replayed.
 
+When exact spending-limit 402 lease rotation is enabled, its configured retry
+budget remains separate from the single network replay. A network failure on
+any initial or post-rotation attempt may consume at most one network replay for
+that request; a 402 retry must rotate the deterministic Resin Account lease
+through the authenticated admin API before rebuilding the route. Neither path
+may select another xAI auth or fall back to another proxy backend.
+
 ## Error behavior
 
 Enabled but unusable Resin configuration returns a request-scoped 503-style
@@ -94,15 +101,23 @@ when xAI returns an exact spending-limit 402.
   key with mode `0600`.
 - Back up every changed production file before replacement.
 - Keep Resin on `vps-gateway`; mount both CPA secret files read-only.
-- Deploy the reviewed CPA source without changing Resin subscriptions,
+- Deploy reviewed Resin and CPA commits only through their existing GitHub
+  Actions build-and-deploy workflows, without changing Resin subscriptions,
   Platforms, or existing auth files.
-- A production-local image uses the reserved `cliproxyapi:*` tag prefix; the
-  deploy script must verify that it exists locally instead of attempting a
-  registry pull. Registry-qualified release images retain normal pull behavior.
+- Production containers must run immutable GHCR `sha-<full commit>` tags. Local
+  `resin:*` and `cliproxyapi:*` tags are allowed only as rollback artifacts and
+  must not remain the steady-state Compose image.
+- A workflow-provided `CLI_PROXY_IMAGE` must take precedence over the server
+  `.env`; `.env` remains the fallback only when no explicit image is supplied.
+- Automated deploy regression coverage must prove both explicit-image
+  precedence and `.env` fallback without invoking Docker or SSH.
 - Verify container health, Resin forward proxy authentication, CPA startup,
   dynamic xAI Account creation, and one real CPA xAI request.
 - Verify a production Resin node failure opens the node circuit at failure count
   one, rotates the same Account lease, and is recovered by CPA's single internal
   replay without returning the first proxy 502 downstream.
+- Wait for Resin's workflow deployment and health gate before pushing CPA, then
+  wait for CPA's workflow deployment and verify both running image names and
+  OCI revision labels match the pushed commits.
 - On any failed verification, restore the previous CPA files/image/config and
   leave Resin data intact.

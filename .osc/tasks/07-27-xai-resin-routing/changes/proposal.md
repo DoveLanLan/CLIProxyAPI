@@ -43,11 +43,30 @@ derived identity reaches the replacement node without switching xAI credentials.
 Disable or remove `xai-resin-proxy` and remove the secret mounts. No auth-file
 migration or persisted-state rollback is needed.
 
+## Official delivery correction
+
+The production follow-up must return both repositories to their existing
+GitHub Actions delivery path. Local Docker tags and image transfer are not a
+release mechanism. Resin must publish and deploy
+`ghcr.io/dovelanlan/resin:sha-<commit>` from `master`; CPA must publish and
+deploy `ghcr.io/dovelanlan/cliproxyapi:sha-<commit>` from `main`.
+
+CPA's deploy script currently sources the server `.env` after the workflow has
+provided `CLI_PROXY_IMAGE`, allowing the stale file value to replace the
+workflow-selected immutable image. Preserve an explicitly supplied image across
+`.env` loading, while retaining `.env` as the fallback for interactive server
+deployments. The correction must be covered by an executable regression test.
+
+Before pushing CPA, integrate the remote exact-402 Resin lease-rotation change
+with the local pre-response network retry. Both retry classes must remain
+bounded and independently safe. Push Resin first, wait for its automatic
+deployment and health verification, then push CPA and wait for the same gates.
+
 ## Authorized production rollout
 
 On 2026-07-28 the operator explicitly authorized auditing and completing the
 deployment on the `bytevirt` VPS. The rollout may update `/opt/cliproxyapi` and
 `/opt/resin`, create the two required CPA secret files, replace the CPA container
-with an image built from this reviewed working tree, and verify real Resin and
-xAI traffic. Existing files must be backed up before mutation and rollback must
-remain available until end-to-end verification passes.
+through the repository workflows, and verify real Resin and xAI traffic.
+Existing files must be backed up before mutation and rollback must remain
+available until end-to-end verification passes.
