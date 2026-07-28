@@ -1,0 +1,26 @@
+# Regression checklist: bounded xAI Resin 402 retry
+
+- [x] Retry configuration defaults to zero and clamps negative/high values to 0/5.
+- [x] Admin URLs reject credentials, unsupported schemes, query, and fragment data.
+- [x] Admin token files are required only for a positive retry count.
+- [x] Resin Platform lookup sends Bearer auth, matches the configured name, and caches the ID.
+- [x] Lease deletion uses the deterministic Account path and treats 204/404 safely.
+- [x] A stale cached Platform ID is resolved again before a second delete.
+- [x] Concurrent rotation calls for one observed generation issue one lease deletion.
+- [x] Failed admin deletion does not advance generation and returns a redacted request-scoped 503.
+- [x] Exact 402 retries the same auth and stable Resin proxy Account.
+- [x] Two configured retries produce at most three total attempts.
+- [x] Non-exact 402 does not rotate or retry.
+- [x] Final exact 402 remains request-scoped and does not invoke EgressProxyPool.
+- [x] Generic HTTP repeats replayable bodies exactly and preserves non-replayable 402 responses.
+- [x] Rejected HTTP response bodies are closed before the next attempt.
+- [x] SSE retries an exact bootstrap 402 and never retries after payload.
+- [x] WebSocket handshake errors retry before connection establishment.
+- [x] Lease generations change WebSocket session targets after rotation.
+- [x] OAuth refresh preserves upstream status/body, retries exact 402, and restores the persisted proxy.
+- [x] Network errors retain request-scoped behavior and zero retries preserve legacy stream behavior.
+- [x] Config diffs redact all three secret file paths.
+- [x] Deploy script syntax and merged Compose configuration validate.
+- [x] `internal/translator/**` is untouched.
+- [x] Focused tests, focused race tests, full tests, focused vet, and required server build pass.
+- [x] No production mutation was performed.

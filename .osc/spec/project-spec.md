@@ -22,8 +22,8 @@ This repository is not a conventional browser frontend project. The interactive 
 
 - Repo root: `/root/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
-- Current task: `.osc/tasks/07-27-xai-resin-routing`
-- Immediate implication: xAI can use Resin sticky forward-proxy routing with one CPA configuration block and deterministic per-auth identities, without per-credential proxy edits.
+- Current task: `.osc/tasks/07-28-xai-resin-rotation-retry`
+- Immediate implication: xAI keeps deterministic per-auth Resin leases during healthy traffic and can use bounded, pre-response exact-402 retries after deleting only the affected Account lease through Resin's authenticated admin API.
 
 **Repo Snapshot**
 - **Modules/Components:** `cmd/server` is the runnable server entrypoint; `internal/{api,auth,cmd,config,logging,managementasset,runtime,store,tui,usage,watcher,wsrelay,...}` contains server-only runtime code; `sdk/{api,auth,cliproxy,config,logging,translator}` is the reusable embedding surface; `docs/`, `examples/`, and `test/` hold consumer docs, samples, and regression coverage. (confidence: High) — evidence: `README.md`, `cmd/server/main.go`, `internal/`, `sdk/`, `docs/`, `examples/`, `test/`
@@ -99,6 +99,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 7. CPA-generated retry guidance may bypass upstream header passthrough only through a narrow managed-error contract; arbitrary upstream headers must remain controlled by `passthrough-headers`. — Evidence: `sdk/api/handlers/handlers.go`, `sdk/api/handlers/handlers_error_response_test.go` (Documented; confidence: High; added 2026-07-27)
 8. xAI egress subscriptions, Mihomo control, lane selection, quarantine, and persistent pool state belong to the standalone `EgressProxyPool` project. CLIProxyAPI retains exact-402 classification and safe HTTP/SSE/WebSocket replay and accesses the pool only through its authenticated private API. — Evidence: `internal/runtime/executor/helps/xai_proxy_pool.go`, `internal/runtime/executor/xai_proxy_pool_executor.go`, `deploy/compose.production.xai-proxy.yml` (Documented; confidence: High; added 2026-07-27)
 9. Optional xAI Resin routing derives a stable anonymous Account as `xai-<HMAC-SHA256(identity-key, auth-id)[:16]>` at runtime. Explicit auth proxies remain higher priority; Resin and EgressProxyPool are mutually exclusive; secret-file failures and Resin transport failures fail closed without cooling xAI credentials or falling back to the global proxy. — Evidence: `internal/runtime/executor/helps/xai_resin_proxy.go`, `internal/runtime/executor/xai_proxy_pool_executor.go`, `deploy/XAI_RESIN_PROXY_SETUP_CN.md` (Documented; confidence: High; added 2026-07-27)
+10. Resin exact-402 rotation preserves the stable Account, deletes only that Account's lease through the authenticated internal Resin admin API, and retries only before downstream payload. Retry counts are bounded; generic HTTP bodies must be replayable; WebSocket lease generations prevent reuse of an old tunnel without interrupting unrelated in-flight streams. — Evidence: `internal/runtime/executor/helps/xai_resin_proxy_admin.go`, `internal/runtime/executor/xai_proxy_pool_executor.go`, `internal/runtime/executor/xai_websockets_executor.go`, `deploy/XAI_RESIN_PROXY_SETUP_CN.md` (Documented; confidence: High; added 2026-07-28)
 
 #### D) Testing strategy & coverage expectations
 1. Treat `go build -o test-output ./cmd/server` as the minimum must-pass pull-request gate, because that is the explicitly wired PR CI check. — Evidence: `.github/workflows/pr-test-build.yml` (Documented; confidence: High)
@@ -113,7 +114,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 ### Top 8 Constraints
 
-- Constraint 1: Current source changes should stay within `.osc/tasks/07-27-xai-resin-routing` unless a new task is selected.
+- Constraint 1: Current source changes should stay within `.osc/tasks/07-28-xai-resin-rotation-retry` unless a new task is selected.
 - Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist or are updated, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
 - Constraint 3: Required repo artifacts do not live only in chat: baseline rules go in `.osc/spec/project-spec.md`, task change packages go in `.osc/tasks/<task-dir>/changes/`, and quality results go in `.osc/quality-gate.md`.
 - Constraint 4: This repository is primarily a Go proxy/server and embeddable SDK, not a bundled browser frontend. UI work in-tree normally means Bubble Tea TUI work or management asset integration.

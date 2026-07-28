@@ -3,3 +3,4 @@ services:
     volumes:
       - ${XAI_RESIN_PROXY_TOKEN_FILE:?set XAI_RESIN_PROXY_TOKEN_FILE}:/run/secrets/resin-proxy-token:ro
       - ${XAI_RESIN_IDENTITY_KEY_FILE:?set XAI_RESIN_IDENTITY_KEY_FILE}:/run/secrets/resin-identity-key:ro
+      - ${XAI_RESIN_ADMIN_TOKEN_FILE:-/dev/null}:/run/secrets/resin-admin-token:ro

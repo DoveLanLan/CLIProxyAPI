@@ -102,6 +102,9 @@ func TestBuildConfigChangeDetails_XAIResinProxyRedactsSecretFiles(t *testing.T) 
 		Platform:        "XAI",
 		ProxyTokenFile:  "/private/proxy-token",
 		IdentityKeyFile: "/private/identity-key",
+		AdminURL:        "http://resin:2260",
+		AdminTokenFile:  "/private/admin-token",
+		Max402Retries:   2,
 	}}
 
 	details := BuildConfigChangeDetails(oldCfg, newCfg)
@@ -110,8 +113,11 @@ func TestBuildConfigChangeDetails_XAIResinProxyRedactsSecretFiles(t *testing.T) 
 	expectContains(t, details, "xai-resin-proxy.platform:  -> XAI")
 	expectContains(t, details, "xai-resin-proxy.proxy-token-file: updated")
 	expectContains(t, details, "xai-resin-proxy.identity-key-file: updated")
+	expectContains(t, details, "xai-resin-proxy.admin-url: <none> -> http://resin:2260")
+	expectContains(t, details, "xai-resin-proxy.admin-token-file: updated")
+	expectContains(t, details, "xai-resin-proxy.max-402-retries: 0 -> 2")
 	for _, detail := range details {
-		if strings.Contains(detail, "/private/proxy-token") || strings.Contains(detail, "/private/identity-key") {
+		if strings.Contains(detail, "/private/proxy-token") || strings.Contains(detail, "/private/identity-key") || strings.Contains(detail, "/private/admin-token") {
 			t.Fatalf("secret file path leaked: %q", detail)
 		}
 	}
