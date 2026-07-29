@@ -22,6 +22,11 @@ fi
 source "$ROOT_DIR/scripts/resolve-cli-proxy-image.sh"
 resolve_cli_proxy_image "$ROOT_DIR/.env"
 
+# shellcheck source=configure-grok-inspection-timer.sh
+source "$ROOT_DIR/scripts/configure-grok-inspection-timer.sh"
+ENABLE_GROK_INSPECTION_TIMER="${ENABLE_GROK_INSPECTION_TIMER:-true}"
+validate_grok_inspection_timer_setting "$ENABLE_GROK_INSPECTION_TIMER"
+
 if [[ "${ENABLE_SPLIT_PROXY:-false}" == "true" ]]; then
   COMPOSE_ARGS+=(-f "$ROOT_DIR/compose.production.split-proxy.yml")
 fi
@@ -123,10 +128,10 @@ docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans
 docker compose "${COMPOSE_ARGS[@]}" ps
 
 if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-  install -m 644 "$GROK_INSPECTION_SERVICE_SOURCE" /etc/systemd/system/grok-inspection.service
-  install -m 644 "$GROK_INSPECTION_TIMER_SOURCE" /etc/systemd/system/grok-inspection.timer
-  systemctl daemon-reload
-  systemctl enable --now grok-inspection.timer
+  configure_grok_inspection_timer \
+    "$ENABLE_GROK_INSPECTION_TIMER" \
+    "$GROK_INSPECTION_SERVICE_SOURCE" \
+    "$GROK_INSPECTION_TIMER_SOURCE"
 else
   echo "warning: systemctl unavailable; Grok inspection timer was not installed" >&2
 fi

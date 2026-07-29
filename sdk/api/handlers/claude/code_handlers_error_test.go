@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -90,5 +91,60 @@ func TestPendingClaudeStreamErrorUsesBufferedError(t *testing.T) {
 	}
 	if gotErr != wantErr {
 		t.Fatalf("pending error = %p, want %p", gotErr, wantErr)
+	}
+}
+
+func TestClaudeStartupErrorAfterBootstrapHeartbeatStaysSSE(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	handler := &ClaudeCodeAPIHandler{}
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
+	msg := &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadGateway,
+		Error:      errors.New("upstream bootstrap failed"),
+	}
+
+	handler.writeClaudeStreamStartupError(c, recorder, msg, true)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: error\n") {
+		t.Fatalf("body does not contain SSE error event: %q", body)
+	}
+	if !strings.Contains(body, `"message":"upstream bootstrap failed"`) {
+		t.Fatalf("body does not contain Claude error payload: %q", body)
+	}
+	if !recorder.Flushed {
+		t.Fatal("startup SSE error was not flushed")
+	}
+}
+
+func TestClaudeStartupErrorBeforeBootstrapHeartbeatPreservesHTTPStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	handler := &ClaudeCodeAPIHandler{}
+	msg := &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadGateway,
+		Error:      errors.New("upstream bootstrap failed"),
+	}
+
+	handler.writeClaudeStreamStartupError(c, recorder, msg, false)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadGateway)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if strings.Contains(recorder.Body.String(), "event: error") {
+		t.Fatalf("body unexpectedly contains SSE error: %q", recorder.Body.String())
 	}
 }

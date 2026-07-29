@@ -1,61 +1,48 @@
-# Quality gate: xAI Resin retry and official deployment repair
+# Quality gate: xAI Resin stream bootstrap keep-alive
 
-Date: 2026-07-28
-Tasks: `.osc/tasks/07-27-xai-resin-routing`, `.osc/tasks/07-28-xai-resin-rotation-retry`
+Date: 2026-07-29
+Task: `.osc/tasks/07-29-xai-resin-bootstrap-keepalive`
 Status: LOCAL PASS; OFFICIAL WORKFLOW DEPLOYMENT PENDING
 
 ## Changed scope
 
-- Stable per-auth xAI Resin routing with no EgressProxyPool or global-proxy
-  fallback while Resin is enabled.
-- One same-auth/same-Account retry for pre-response Resin network failures.
-- Bounded exact spending-limit 402 lease rotation through the Resin admin API.
-- Independent network and exact-402 retry budgets across HTTP, SSE, WebSocket,
-  management HTTP, and refresh paths.
-- Production Resin overlay, config validation, secret redaction, and operator
-  documentation.
-- GitHub Actions image precedence over the server `.env`, with a sourceable
-  resolver and Docker/SSH-free regression coverage.
-- No changes under `internal/translator/**`.
+- Downstream SSE heartbeats during the blocking Claude-compatible stream
+  bootstrap wait.
+- Claude SSE terminal-error handling after a bootstrap heartbeat commits 200.
+- Explicit production Grok inspection timer deployment state.
+- Deployment template and operator documentation.
+- No Resin source changes and no changes under `internal/translator/**`.
 
 ## Required and focused gates
 
 | Command | Result |
 |---|---|
 | `gofmt -w .` | PASS |
-| `go test ./internal/runtime/executor -run 'Resin' -count=1` | PASS |
-| `go test -race -run 'Resin' ./internal/runtime/executor -count=1` | PASS |
-| `go test -race -run 'XAIResin' ./internal/runtime/executor/helps -count=1` | PASS |
-| Focused `go vet` for all changed Go packages | PASS |
+| `go test -race ./sdk/api/handlers -run StreamingBootstrapKeepAlive -count=5` | PASS |
+| `go test -race ./sdk/api/handlers/claude -run 'Bootstrap\\|StartupError' -count=1` | PASS |
+| `go test ./sdk/api/handlers/... ./internal/runtime/executor/...` | PASS |
+| `go test ./internal/runtime/executor -run Resin -count=1` | PASS |
 | `go test ./...` | PASS |
 | `go build -o test-output ./cmd/server && rm test-output` | PASS |
-| `bash -n` for deploy and image-resolution scripts | PASS |
+| `bash -n deploy/scripts/*.sh` | PASS |
 | `deploy/scripts/resolve-cli-proxy-image_test.sh` | PASS |
-| Base + Resin overlay `docker compose ... config` | PASS |
+| `deploy/scripts/configure-grok-inspection-timer_test.sh` | PASS |
 | `git diff --check` | PASS |
 | Changed-path guard for `internal/translator/**` | PASS |
 
-The release commit is ready for the required ordered workflow rollout: Resin
-first, then CPA. Workflow run IDs, immutable image names, OCI revision labels,
-health checks, and repeated production request results are verified after the
-commit is pushed and therefore are reported with the deployment result rather
-than predicted in this source artifact.
+## Production preparation
 
-## Prior controlled production evidence
+- bytevirt `/opt/cliproxyapi/.env` now contains
+  `ENABLE_GROK_INSPECTION_TIMER=false`; no other environment values were read
+  back or recorded.
+- Before deployment, `grok-inspection.timer` is disabled/inactive and
+  `grok-inspection.service` is inactive.
 
-- CPA and Resin were healthy on `vps-gateway` using temporary rollback images.
-- A scoped Resin node connection failure produced an internal `connect_dial`
-  502, opened that node's circuit, and moved the same Account lease to another
-  node.
-- CPA's one pre-response retry hid the first proxy failure; both the management
-  client and xAI upstream returned HTTP 200.
-- Twenty consecutive real `grok-4.5` requests returned HTTP 200 with zero HTTP
-  502 responses and a mean duration of 3.665 seconds.
-- The CPA rollback backup remains at
-  `/opt/cliproxyapi/backups/xai-resin-retry-20260728T121546Z`.
+## Baseline note
 
-## Baseline notes
-
-Full `go vet ./...` has existing warnings in unchanged logging, handler, and
-plugin-host files. Focused vet covers all changed Go packages. `shellcheck` is
-not installed; `bash -n` and the executable shell regression are required.
+A broad `go test -race ./sdk/api/handlers` run reports an existing race in
+`TestHandlerStreamInterceptorInitializesHeadersBeforeReturn` between the test's
+header read and the existing stream interceptor's header replacement. The race
+does not involve the new response writer or changed files. Focused race runs for
+all new bootstrap tests pass. `shellcheck` is not installed; shell syntax and
+executable regression tests pass.

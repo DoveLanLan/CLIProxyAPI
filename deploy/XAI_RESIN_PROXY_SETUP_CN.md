@@ -140,6 +140,7 @@ xai-resin-proxy:
 
 ```env
 GATEWAY_NETWORK=vps-gateway
+ENABLE_GROK_INSPECTION_TIMER=false
 ENABLE_XAI_PROXY_POOL=false
 ENABLE_XAI_RESIN_PROXY=true
 XAI_RESIN_PROXY_TOKEN_FILE=/opt/resin/secrets/proxy-token
@@ -151,6 +152,8 @@ XAI_RESIN_MAX_402_RETRIES=2
 `XAI_RESIN_MAX_402_RETRIES` 只用于部署前校验 admin token 挂载，必须与
 `config.yaml` 的 `max-402-retries` 保持一致。然后运行 CPA 的生产部署脚本。脚本会
 校验三个 secret 文件，挂载到 CPA 容器并拒绝同时启用旧 EgressProxyPool overlay。
+`ENABLE_GROK_INSPECTION_TIMER=false` 会在每次部署时保持五分钟巡检任务为停止状态；
+需要恢复时改为 `true` 后重新部署。
 
 ```bash
 cd /opt/cliproxyapi

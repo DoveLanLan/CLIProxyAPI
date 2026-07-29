@@ -1,0 +1,16 @@
+{
+  "name": "Prevent Cloudflare 524 during xAI Resin bootstrap",
+  "type": "bugfix",
+  "branch": "task/xai-resin-bootstrap-keepalive",
+  "priority": "P1",
+  "description": "Keep Cloudflare-facing SSE connections alive while xAI Resin bootstrap waits for the first meaningful payload, and preserve the production Grok inspection timer disable state across deployments.",
+  "depends_on": [],
+  "status": "in_progress",
+  "current_phase": 3,
+  "next_action": [
+    "Commit and push the verified change",
+    "Verify the GitHub Actions deployment and production behavior"
+  ],
+  "requires_change_workflow": true,
+  "change_workflow_status": "approved"
+}

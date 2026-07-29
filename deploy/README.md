@@ -53,6 +53,7 @@ The shared gateway stack lives at `/opt/vps-gateway` and is the only container t
    - `GATEWAY_CONTAINER` to the gateway nginx container, usually `vps-gateway-nginx`
    - `TAILSCALE_BIND_IP` to the VPS Tailscale IPv4
    - `TAILSCALE_MANAGEMENT_PORT` to the private management port you want to use
+   - `ENABLE_GROK_INSPECTION_TIMER=false` when deployments must keep the five-minute Grok inspection job stopped
    - `ENABLE_SPLIT_PROXY=true` only if you want the local split-proxy sidecar
    - `ENABLE_XAI_PROXY_POOL=true` only after starting the standalone EgressProxyPool project
    - `EGRESS_PROXY_NETWORK` and `EGRESS_PROXY_API_TOKEN` to its shared network and token path
@@ -105,8 +106,11 @@ After deployment, open the management panel over Tailscale, go to the official p
 
 Grok Inspection runs as trusted in-process code and can disable or delete auth credentials after operator confirmation. Back up `data/auths/` and `data/config.yaml` before the first installation, and run inspection without applying suggested actions until the results have been reviewed.
 
-The production deploy script installs and enables the tracked five-minute
-systemd timer after the application container is running. Its safe-apply policy
+The production deploy script always installs the tracked systemd units after
+the application container is running. `ENABLE_GROK_INSPECTION_TIMER` controls
+their runtime state and defaults to `true` for compatibility. Set it to `false`
+to disable and stop the timer and stop any active inspection service; later
+deployments will preserve that disabled state. Its safe-apply policy
 disables permanent authentication failures, including `permission_denied`, but
 keeps rolling quota exhaustion and transient probe failures recoverable. The
 timer reads the management key from `data/.management-key`; keep that file mode
