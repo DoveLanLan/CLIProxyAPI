@@ -14,4 +14,4 @@
 - [x] Run `go build -o test-output ./cmd/server && rm test-output`.
 - [x] Confirm `internal/translator/**` is untouched and `git diff --check` passes.
 - [x] Write regression, rollback, summary, and quality-gate artifacts.
-- [ ] Commit and push, then verify the GitHub Actions deployment and production.
+- [x] Commit and push, then verify the GitHub Actions deployment and production.

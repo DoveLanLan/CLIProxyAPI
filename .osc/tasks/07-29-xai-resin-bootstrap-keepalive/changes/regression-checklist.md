@@ -22,9 +22,9 @@
 - [x] Production `.env` contains only the intended persisted value
       `ENABLE_GROK_INSPECTION_TIMER=false` for this change.
 - [x] Before deployment, the production timer/service remain disabled/inactive.
-- [ ] Immutable GitHub Actions image is deployed and verified on bytevirt.
-- [ ] Production timer/service remain disabled/inactive after deployment.
-- [ ] CPA and Resin production health checks pass after deployment.
+- [x] Immutable GitHub Actions image is deployed and verified on bytevirt.
+- [x] Production timer/service remain disabled/inactive after deployment.
+- [x] CPA and Resin production health checks pass after deployment.
 
 ## Repository gates
 

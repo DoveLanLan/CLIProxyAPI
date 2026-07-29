@@ -26,3 +26,10 @@
 Only CLIProxyAPI is changed. The immutable CPA image is built and deployed by
 the existing GitHub Actions workflows; no local image or custom tag is used.
 Resin source and its workflow are untouched.
+
+Production is running
+`ghcr.io/dovelanlan/cliproxyapi:sha-d6027f472377d9e05af927700b57058fd9c67483`
+with a matching OCI revision. A real Cloudflare-facing `grok-4.5` stream
+returned HTTP 200 after 49.25 seconds, with three bootstrap heartbeats before
+the first model payload. CPA and Resin health checks pass, while the Grok timer
+and service remain disabled/inactive.

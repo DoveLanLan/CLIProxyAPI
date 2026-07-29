@@ -2,7 +2,7 @@
 
 Date: 2026-07-29
 Task: `.osc/tasks/07-29-xai-resin-bootstrap-keepalive`
-Status: LOCAL PASS; OFFICIAL WORKFLOW DEPLOYMENT PENDING
+Status: PASS; OFFICIAL WORKFLOW DEPLOYMENT VERIFIED
 
 ## Changed scope
 
@@ -37,6 +37,22 @@ Status: LOCAL PASS; OFFICIAL WORKFLOW DEPLOYMENT PENDING
   back or recorded.
 - Before deployment, `grok-inspection.timer` is disabled/inactive and
   `grok-inspection.service` is inactive.
+
+## Production verification
+
+- Commit: `d6027f472377d9e05af927700b57058fd9c67483`
+- Docker workflow: `docker-image` run `30416414868`, success.
+- Deployment workflow: `deploy-production` run `30416499287`, success.
+- Image: `ghcr.io/dovelanlan/cliproxyapi:sha-d6027f472377d9e05af927700b57058fd9c67483`
+- OCI revision matches the commit; the CPA container is running and `/healthz`
+  returns 200 through both the private binding and Cloudflare public route.
+- Resin is running with Docker health `healthy`; its `/healthz` returns 200.
+- After deployment, `grok-inspection.timer` remains disabled/inactive and
+  `grok-inspection.service` remains inactive.
+- A real Cloudflare-facing `grok-4.5` Claude SSE request returned HTTP 200 in
+  49.25 seconds. The first SSE item was a bootstrap heartbeat, three heartbeats
+  arrived before the first model payload, and the payload then completed
+  normally.
 
 ## Baseline note
 
