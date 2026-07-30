@@ -59,10 +59,24 @@ entry remains disabled, and only then enabling that entry.
 Roll back through the normal immutable-image workflow with:
 
 ```bash
-git revert --no-edit 5bf14e5d21925dbd915336cf37ac0f3b46aeb20e
-git revert --no-edit aa2cbf95f8eb6906399fd0c74b316ee51a6ef622
+git restore --source=08c59a462ce145116c61d5942dd4f11e61bc4d2a -- \
+  internal/runtime/executor/helps/openai_message_links.go \
+  internal/runtime/executor/openai_compat_executor.go \
+  internal/runtime/executor/openai_compat_executor_compact_test.go \
+  sdk/api/handlers/claude/code_handlers.go \
+  sdk/api/handlers/claude/code_handlers_error_test.go
+git rm -- \
+  internal/runtime/executor/helps/openai_compat_deepseek.go \
+  internal/runtime/executor/helps/openai_compat_deepseek_test.go \
+  internal/runtime/executor/helps/openai_message_links_test.go
+gofmt -w .
+go test ./...
+go build -o test-output ./cmd/server && rm test-output
+git commit -m "revert: remove DeepSeek Claude continuation fix"
 git push origin main
 ```
 
-Wait for the resulting Docker and production workflows, then verify the new OCI
-revision and `/healthz`. Do not edit the binary inside the running container.
+This source-only rollback was dry-run in an isolated worktree and deliberately keeps
+the task audit documents. Wait for the resulting Docker and production workflows,
+then verify the new OCI revision and `/healthz`. Do not edit the binary inside the
+running container.
