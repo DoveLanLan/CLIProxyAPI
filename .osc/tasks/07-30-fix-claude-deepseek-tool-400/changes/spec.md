@@ -37,10 +37,10 @@ Tests and reports may record status, model, message roles, block types, token co
 lengths, and request IDs. They must not record credentials or full sensitive payloads.
 
 When a safe structured upstream error body is available, the Claude-compatible
-client response must retain the useful message and request identifier. It must not
-include credentials, authorization headers, or full request payloads. If the
-upstream omits actual model or context-limit metadata, the gateway must not invent
-those values.
+client response must retain the useful message, string error code, actual model
+identifier, and request identifier when present. It must not include credentials,
+authorization headers, or full request payloads. If the upstream omits actual model
+or context-limit metadata, the gateway must not invent those values.
 
 ## DeepSeek capability validation
 

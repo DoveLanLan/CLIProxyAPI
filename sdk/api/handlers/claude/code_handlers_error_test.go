@@ -31,6 +31,9 @@ func TestClaudeErrorExtractsOpenAIStyleUpstreamJSON(t *testing.T) {
 	if got.Error.Message != "Your input exceeds the context window of this model. Please adjust your input and try again." {
 		t.Fatalf("error.message = %q", got.Error.Message)
 	}
+	if got.Error.Code != "context_too_large" {
+		t.Fatalf("error.code = %q, want context_too_large", got.Error.Code)
+	}
 }
 
 func TestClaudeErrorExtractsClaudeStyleUpstreamJSON(t *testing.T) {
@@ -65,6 +68,23 @@ func TestClaudeErrorExtractsRequestIDFromUpstreamHeader(t *testing.T) {
 
 	if got.RequestID != "req_header_123" {
 		t.Fatalf("request_id = %q, want req_header_123", got.RequestID)
+	}
+}
+
+func TestClaudeErrorPreservesStructuredCompatibilityMetadata(t *testing.T) {
+	handler := &ClaudeCodeAPIHandler{}
+	msg := &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadRequest,
+		Error:      errors.New(`{"error":{"type":"invalid_request_error","code":"model_text_only","message":"text only","upstream_model":"deepseek-v4-pro"}}`),
+	}
+
+	got := handler.toClaudeError(msg)
+
+	if got.Error.Code != "model_text_only" {
+		t.Fatalf("error.code = %q, want model_text_only", got.Error.Code)
+	}
+	if got.Error.UpstreamModel != "deepseek-v4-pro" {
+		t.Fatalf("error.upstream_model = %q, want deepseek-v4-pro", got.Error.UpstreamModel)
 	}
 }
 

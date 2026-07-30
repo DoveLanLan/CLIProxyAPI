@@ -398,8 +398,10 @@ func (h *ClaudeCodeAPIHandler) writeClaudeStreamError(c *gin.Context, errMsg *in
 }
 
 type claudeErrorDetail struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
+	Type          string `json:"type"`
+	Message       string `json:"message"`
+	Code          string `json:"code,omitempty"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
 }
 
 type claudeErrorResponse struct {
@@ -422,17 +424,14 @@ func (h *ClaudeCodeAPIHandler) toClaudeError(msg *interfaces.ErrorMessage) claud
 			}
 		}
 	}
-	errType, message, requestID := claudeErrorDetailFromText(status, errText)
+	detail, requestID := claudeErrorDetailFromText(status, errText)
 	if requestID == "" && msg != nil {
 		requestID = claudeRequestIDFromHeaders(msg.Addon)
 	}
 	return claudeErrorResponse{
 		Type:      "error",
 		RequestID: requestID,
-		Error: claudeErrorDetail{
-			Type:    errType,
-			Message: message,
-		},
+		Error:     detail,
 	}
 }
 
@@ -465,12 +464,15 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 	_, _ = c.Writer.Write(body)
 }
 
-func claudeErrorDetailFromText(status int, errText string) (string, string, string) {
+func claudeErrorDetailFromText(status int, errText string) (claudeErrorDetail, string) {
 	message := strings.TrimSpace(errText)
 	if message == "" {
 		message = http.StatusText(status)
 	}
-	errType := claudeErrorTypeFromStatus(status)
+	detail := claudeErrorDetail{
+		Type:    claudeErrorTypeFromStatus(status),
+		Message: message,
+	}
 	requestID := ""
 
 	var payload map[string]any
@@ -486,25 +488,47 @@ func claudeErrorDetailFromText(status int, errText string) (string, string, stri
 					}
 				}
 				if t, ok := e["type"].(string); ok && strings.TrimSpace(t) != "" {
-					errType = strings.TrimSpace(t)
+					detail.Type = strings.TrimSpace(t)
 				}
 				if m, ok := e["message"].(string); ok && strings.TrimSpace(m) != "" {
-					message = strings.TrimSpace(m)
+					detail.Message = strings.TrimSpace(m)
 				} else if c, ok := e["code"].(string); ok && strings.TrimSpace(c) != "" {
-					message = strings.TrimSpace(c)
+					detail.Message = strings.TrimSpace(c)
+				}
+				detail.Code = safeClaudeErrorMetadata(e["code"], 128)
+				detail.UpstreamModel = safeClaudeErrorMetadata(e["upstream_model"], 256)
+				if detail.UpstreamModel == "" {
+					detail.UpstreamModel = safeClaudeErrorMetadata(e["model"], 256)
 				}
 			} else {
 				if t, ok := payload["type"].(string); ok && strings.TrimSpace(t) != "" && strings.TrimSpace(t) != "error" {
-					errType = strings.TrimSpace(t)
+					detail.Type = strings.TrimSpace(t)
 				}
 				if m, ok := payload["message"].(string); ok && strings.TrimSpace(m) != "" {
-					message = strings.TrimSpace(m)
+					detail.Message = strings.TrimSpace(m)
+				}
+				detail.Code = safeClaudeErrorMetadata(payload["code"], 128)
+				detail.UpstreamModel = safeClaudeErrorMetadata(payload["upstream_model"], 256)
+				if detail.UpstreamModel == "" {
+					detail.UpstreamModel = safeClaudeErrorMetadata(payload["model"], 256)
 				}
 			}
 		}
 	}
 
-	return errType, message, requestID
+	return detail, requestID
+}
+
+func safeClaudeErrorMetadata(value any, maxLen int) string {
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || len(text) > maxLen {
+		return ""
+	}
+	return text
 }
 
 func claudeRequestIDFromHeaders(headers http.Header) string {

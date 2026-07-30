@@ -34,7 +34,8 @@ The observed failures do not have one universal cause:
   not cool or rotate credentials.
 - Preserve upstream response headers on OpenAI-compatible status errors and include
   a sanitized upstream request ID in Claude-compatible JSON errors. Valid upstream
-  JSON still supplies the client-visible error type and message.
+  JSON still supplies the client-visible error type, message, string code, and model
+  identifier when present.
 - Cover direct helper behavior plus non-streaming and streaming executor paths,
   capability failures, upstream request IDs, and Claude error conversion.
 
