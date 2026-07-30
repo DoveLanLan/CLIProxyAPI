@@ -4,3 +4,5 @@
 [2026-07-30T06:46:56Z] Error propagation, pre-dispatch capability validation, full tests, focused race tests, build, diff check, and repository secret scan passed.
 [2026-07-30T06:56:00Z] Commit aa2cbf95 built and deployed successfully; production text and reasoning continuation returned 200 while image and named tool choice returned local descriptive 400 errors.
 [2026-07-30T06:56:00Z] Added final Claude-envelope preservation for structured error code and upstream model after production regression exposed their omission; full tests, focused race, and build passed again.
+[2026-07-30T07:08:00Z] Final commit 5bf14e5d deployed successfully; image/model capability errors and reasoning continuation passed the production matrix.
+[2026-07-30T07:08:00Z] Disabled and evacuated the exposed OpenCode credential from active production config; fallback text and reasoning checks remained 200. Provider-side revocation awaits an authenticated OpenCode session.

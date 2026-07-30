@@ -7,7 +7,9 @@
   "depends_on": [],
   "status": "in_progress",
   "current_phase": 1,
-  "next_action": [],
+  "next_action": [
+    "Authenticate to the OpenCode control plane, revoke/regenerate the evacuated credential, and install the replacement without logging either value."
+  ],
   "requires_change_workflow": true,
   "change_workflow_status": "in_progress"
 }

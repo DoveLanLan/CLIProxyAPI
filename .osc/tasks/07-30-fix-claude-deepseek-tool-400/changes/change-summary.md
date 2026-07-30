@@ -40,9 +40,10 @@ The observed failures do not have one universal cause:
   capability failures, upstream request IDs, and Claude error conversion.
 
 The repository patch is formatted, fully tested, race-checked on the affected paths,
-and build-verified. It is not yet in the currently deployed immutable image
-`sha-d6027f...`; delivery status is recorded separately after the immutable image
-workflow completes.
+and build-verified. Commits `aa2cbf95` and `5bf14e5d` were pushed to `main` and
+deployed through the immutable image workflow. Production runs image
+`sha-5bf14e5d21925dbd915336cf37ac0f3b46aeb20e`, whose OCI revision matches the
+commit.
 
 The OpenCode Go upstream still returns a generic structured message for the two
 unsupported request shapes and does not provide the actual routed model, published
@@ -71,6 +72,20 @@ The bytevirt configuration now uses `streaming.bootstrap-retries: 1`. The watche
 reloaded it without a container restart. This retry is bounded to a failure before
 the first downstream payload and does not address protocol-invalid requests.
 
-The host and current container bind-mount views contain the same configuration but
-have different inodes because an initial host-side replacement occurred. Both views
-were updated; the next normal container recreation will remount the host inode.
+The final deployment remounted the production configuration. Host and container
+views now have the same inode and both report `bootstrap-retries: 1`.
+
+## Credential containment
+
+The exposed OpenCode upstream credential was removed from the active production
+configuration and its `opencode new` provider entry was disabled. Plain text and
+reasoning tool continuation both remained 200 through the remaining DeepSeek
+providers after removal. The pre-change values remain only in two root-owned mode
+600 timestamped backups for emergency rollback.
+
+Provider-side revocation/regeneration is still required because disabling and
+removing a credential from CLIProxyAPI cannot invalidate it at OpenCode. No logged-in
+OpenCode control-plane session or supported key-rotation API is available on this
+machine. Installing a replacement therefore requires an operator-authenticated
+OpenCode console session; neither the old nor a future replacement value belongs in
+chat, logs, or repository files.

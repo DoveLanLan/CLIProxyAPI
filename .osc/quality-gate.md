@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 Task: `.osc/tasks/07-30-fix-claude-deepseek-tool-400`
-Status: PASS LOCALLY; SOURCE DEPLOYMENT PENDING
+Status: PASS; PRODUCTION DEPLOYMENT VERIFIED; PROVIDER REVOCATION PENDING
 
 ## Changed scope
 
@@ -46,13 +46,21 @@ Status: PASS LOCALLY; SOURCE DEPLOYMENT PENDING
 
 ## Delivery note
 
-The source patch is verified but uncommitted and not deployed. Production remains on
-`ghcr.io/dovelanlan/cliproxyapi:sha-d6027f...`; the config and local-profile
-mitigations are active independently.
+Commits `aa2cbf95` and `5bf14e5d` are pushed to `main`. Final Docker workflow
+`30521223617` and deployment workflow `30521315577` succeeded. Production runs
+`ghcr.io/dovelanlan/cliproxyapi:sha-5bf14e5d21925dbd915336cf37ac0f3b46aeb20e`;
+the OCI revision matches, both public and Tailscale health checks return 200, and
+host/container configuration views share one inode with `bootstrap-retries: 1`.
+
+The final production matrix returns 200 for plain text and empty-signature reasoning
+tool continuation. Image and named tool choice return local structured 400 errors
+with `model_text_only` or `unsupported_tool_choice` plus the actual model identifier.
 
 ## Security note
 
 No tokens or full sensitive request bodies are recorded in repository artifacts.
-The local debug log remains mode 600 and must not be copied verbatim. An upstream
-credential appeared in transient terminal output during diagnosis; rotate that
-credential even though it was not persisted in these changes.
+The local debug log remains mode 600 and must not be copied verbatim. The exposed
+OpenCode credential is removed from active production config and its entry is
+disabled; fallback production checks pass. Root-only mode 600 emergency backups
+still contain it. Provider-side revocation/regeneration remains blocked on an
+authenticated OpenCode control-plane session.

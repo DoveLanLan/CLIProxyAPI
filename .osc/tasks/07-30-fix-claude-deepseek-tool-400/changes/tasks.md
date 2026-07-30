@@ -13,7 +13,10 @@
 - [x] Trace and repair safe upstream error propagation.
 - [x] Add DeepSeek text-only image and named-tool-choice capability validation.
 - [x] Add focused tests and rerun all repository gates.
-- [ ] Rotate the exposed upstream credential without logging either value.
-- [ ] Commit and push the completed change to `main`.
-- [ ] Wait for GitHub image/deploy workflows and verify production behavior.
-- [ ] Refresh delivery, regression, rollback, project-spec, and quality-gate records.
+- [x] Disable and evacuate the exposed upstream credential without logging its value;
+  verify fallback text and reasoning behavior.
+- [ ] Revoke/regenerate the evacuated credential in an authenticated OpenCode
+  control-plane session.
+- [x] Commit and push the completed source change to `main`.
+- [x] Wait for GitHub image/deploy workflows and verify production behavior.
+- [x] Refresh delivery, regression, rollback, project-spec, and quality-gate records.

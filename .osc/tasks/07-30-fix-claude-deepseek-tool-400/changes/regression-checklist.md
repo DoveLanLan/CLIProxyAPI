@@ -56,6 +56,18 @@ or full request body is stored in this task package.
 
 - [x] Production config hot reload confirmed `bootstrap-retries: 1` in both host
   and current container views.
-- [x] Production container remained running on `sha-d6027f...`.
-- [ ] Exact Claude-thinking restoration is live in production; pending an explicit
-  commit/build/deploy action.
+- [x] Docker workflow `30521223617` and deployment workflow `30521315577` completed
+  successfully for final commit `5bf14e5d`.
+- [x] Production image and OCI revision both identify
+  `5bf14e5d21925dbd915336cf37ac0f3b46aeb20e`.
+- [x] Public and Tailscale `/healthz` return 200.
+- [x] Final production plain text returns 200.
+- [x] Final production empty-signature reasoning tool continuation returns 200.
+- [x] Final production image input returns 400 with `model_text_only` and the actual
+  `deepseek-v4-pro` model identifier.
+- [x] Final production named tool choice returns 400 with
+  `unsupported_tool_choice` and the actual model identifier.
+- [x] The exposed OpenCode credential is absent from active config and its provider
+  is disabled; fallback text and reasoning checks still return 200.
+- [ ] Revoke/regenerate the evacuated credential in an authenticated OpenCode
+  control-plane session.
