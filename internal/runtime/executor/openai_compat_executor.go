@@ -99,6 +99,11 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 
 	from := opts.SourceFormat
+	if from == sdktranslator.FromString("claude") && requiresOpenAIReasoningEcho(baseModel) {
+		if issue, incompatible := helps.DetectDeepSeekClaudeCompatibilityIssue(req.Payload, baseModel); incompatible {
+			return resp, deepSeekClaudeCompatibilityError(issue, baseModel)
+		}
+	}
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
 	to := sdktranslator.FromString("openai")
 	endpoint := "/chat/completions"
@@ -131,6 +136,12 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	if to == sdktranslator.FromString("openai") && requiresOpenAIReasoningEcho(baseModel) {
 		// DeepSeek rejects tool-followup turns in thinking mode when prior
 		// assistant reasoning_content is not echoed back.
+		if from == sdktranslator.FromString("claude") {
+			translated, err = helps.RestoreOpenAIReasoningFromClaudeToolCalls(translated, req.Payload, "openai compat executor")
+			if err != nil {
+				return resp, err
+			}
+		}
 		translated, err = helps.NormalizeOpenAIToolMessageLinks(translated, "openai compat executor")
 		if err != nil {
 			return resp, err
@@ -188,7 +199,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = statusErr{code: httpResp.StatusCode, msg: string(b), headers: httpResp.Header.Clone()}
 		return resp, err
 	}
 	body, err := io.ReadAll(httpResp.Body)
@@ -286,7 +297,7 @@ func (e *OpenAICompatExecutor) executeImages(ctx context.Context, auth *cliproxy
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		err = statusErr{code: httpResp.StatusCode, msg: string(body)}
+		err = statusErr{code: httpResp.StatusCode, msg: string(body), headers: httpResp.Header.Clone()}
 		return resp, err
 	}
 
@@ -313,6 +324,11 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}
 
 	from := opts.SourceFormat
+	if from == sdktranslator.FromString("claude") && requiresOpenAIReasoningEcho(baseModel) {
+		if issue, incompatible := helps.DetectDeepSeekClaudeCompatibilityIssue(req.Payload, baseModel); incompatible {
+			return nil, deepSeekClaudeCompatibilityError(issue, baseModel)
+		}
+	}
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
 	to := sdktranslator.FromString("openai")
 	originalPayloadSource := req.Payload
@@ -338,6 +354,12 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	if requiresOpenAIReasoningEcho(baseModel) {
 		// DeepSeek rejects tool-followup turns in thinking mode when prior
 		// assistant reasoning_content is not echoed back.
+		if from == sdktranslator.FromString("claude") {
+			translated, err = helps.RestoreOpenAIReasoningFromClaudeToolCalls(translated, req.Payload, "openai compat executor")
+			if err != nil {
+				return nil, err
+			}
+		}
 		translated, err = helps.NormalizeOpenAIToolMessageLinks(translated, "openai compat executor")
 		if err != nil {
 			return nil, err
@@ -395,7 +417,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = statusErr{code: httpResp.StatusCode, msg: string(b), headers: httpResp.Header.Clone()}
 		return nil, err
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -426,7 +448,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 					continue
 				}
 				if bytes.HasPrefix(trimmedLine, []byte("{")) || bytes.HasPrefix(trimmedLine, []byte("[")) {
-					streamErr := statusErr{code: http.StatusBadGateway, msg: string(trimmedLine)}
+					streamErr := statusErr{code: http.StatusBadGateway, msg: string(trimmedLine), headers: httpResp.Header.Clone()}
 					helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
 					reporter.PublishFailure(ctx, streamErr)
 					select {
@@ -552,7 +574,7 @@ func (e *OpenAICompatExecutor) executeImagesStream(ctx context.Context, auth *cl
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, body)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		return nil, statusErr{code: httpResp.StatusCode, msg: string(body)}
+		return nil, statusErr{code: httpResp.StatusCode, msg: string(body), headers: httpResp.Header.Clone()}
 	}
 
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -806,9 +828,11 @@ func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byt
 }
 
 type statusErr struct {
-	code       int
-	msg        string
-	retryAfter *time.Duration
+	code          int
+	msg           string
+	retryAfter    *time.Duration
+	headers       http.Header
+	requestScoped bool
 }
 
 func (e statusErr) Error() string {
@@ -819,3 +843,25 @@ func (e statusErr) Error() string {
 }
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
+func (e statusErr) IsRequestScoped() bool      { return e.requestScoped }
+func (e statusErr) Headers() http.Header {
+	if e.headers == nil {
+		return nil
+	}
+	return e.headers.Clone()
+}
+
+func deepSeekClaudeCompatibilityError(issue helps.DeepSeekClaudeCompatibilityIssue, model string) error {
+	body, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"type":           "invalid_request_error",
+			"code":           issue.Code,
+			"message":        issue.Message,
+			"upstream_model": strings.TrimSpace(model),
+		},
+	})
+	if err != nil {
+		return statusErr{code: http.StatusBadRequest, msg: issue.Message, requestScoped: true}
+	}
+	return statusErr{code: http.StatusBadRequest, msg: string(body), requestScoped: true}
+}

@@ -403,8 +403,9 @@ type claudeErrorDetail struct {
 }
 
 type claudeErrorResponse struct {
-	Type  string            `json:"type"`
-	Error claudeErrorDetail `json:"error"`
+	Type      string            `json:"type"`
+	Error     claudeErrorDetail `json:"error"`
+	RequestID string            `json:"request_id,omitempty"`
 }
 
 func (h *ClaudeCodeAPIHandler) toClaudeError(msg *interfaces.ErrorMessage) claudeErrorResponse {
@@ -421,9 +422,13 @@ func (h *ClaudeCodeAPIHandler) toClaudeError(msg *interfaces.ErrorMessage) claud
 			}
 		}
 	}
-	errType, message := claudeErrorDetailFromText(status, errText)
+	errType, message, requestID := claudeErrorDetailFromText(status, errText)
+	if requestID == "" && msg != nil {
+		requestID = claudeRequestIDFromHeaders(msg.Addon)
+	}
 	return claudeErrorResponse{
-		Type: "error",
+		Type:      "error",
+		RequestID: requestID,
 		Error: claudeErrorDetail{
 			Type:    errType,
 			Message: message,
@@ -460,17 +465,26 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 	_, _ = c.Writer.Write(body)
 }
 
-func claudeErrorDetailFromText(status int, errText string) (string, string) {
+func claudeErrorDetailFromText(status int, errText string) (string, string, string) {
 	message := strings.TrimSpace(errText)
 	if message == "" {
 		message = http.StatusText(status)
 	}
 	errType := claudeErrorTypeFromStatus(status)
+	requestID := ""
 
 	var payload map[string]any
 	if json.Valid([]byte(message)) {
 		if err := json.Unmarshal([]byte(message), &payload); err == nil {
+			if id, ok := payload["request_id"].(string); ok {
+				requestID = safeClaudeRequestID(id)
+			}
 			if e, ok := payload["error"].(map[string]any); ok {
+				if requestID == "" {
+					if id, ok := e["request_id"].(string); ok {
+						requestID = safeClaudeRequestID(id)
+					}
+				}
 				if t, ok := e["type"].(string); ok && strings.TrimSpace(t) != "" {
 					errType = strings.TrimSpace(t)
 				}
@@ -490,7 +504,35 @@ func claudeErrorDetailFromText(status int, errText string) (string, string) {
 		}
 	}
 
-	return errType, message
+	return errType, message, requestID
+}
+
+func claudeRequestIDFromHeaders(headers http.Header) string {
+	for _, key := range []string{"X-Request-Id", "Request-Id", "X-Upstream-Request-Id"} {
+		if id := safeClaudeRequestID(headers.Get(key)); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func safeClaudeRequestID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 256 {
+		return ""
+	}
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' {
+			continue
+		}
+		switch char {
+		case '-', '_', '.', ':':
+			continue
+		default:
+			return ""
+		}
+	}
+	return value
 }
 
 func claudeErrorTypeFromStatus(status int) string {

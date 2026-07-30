@@ -145,11 +145,130 @@ func TestOpenAICompatExecutorDeepSeekClaudeToolFollowupAddsReasoningEcho(t *test
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	if got := strings.TrimSpace(gjson.GetBytes(gotBody, "messages.1.reasoning_content").String()); got == "" {
-		t.Fatalf("messages.1.reasoning_content should be present for Claude tool follow-up; body=%s", string(gotBody))
+	if got := gjson.GetBytes(gotBody, "messages.1.reasoning_content").String(); got != "I should call the read tool" {
+		t.Fatalf("messages.1.reasoning_content = %q, want exact Claude thinking; body=%s", got, string(gotBody))
 	}
 	if got := gjson.GetBytes(gotBody, "messages.2.tool_call_id").String(); got != "call_1" {
 		t.Fatalf("messages.2.tool_call_id = %q, want %q; body=%s", got, "call_1", string(gotBody))
+	}
+}
+
+func TestOpenAICompatExecutorDeepSeekClaudeRejectsImageBeforeUpstream(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	payload := []byte(`{
+		"model":"deepseek-v4-pro",
+		"max_tokens":32,
+		"messages":[{"role":"user","content":[{
+			"type":"image",
+			"source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}
+		}]}]
+	}`)
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "deepseek-v4-pro",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("claude"),
+		Stream:       false,
+	})
+	if err == nil {
+		t.Fatal("expected image compatibility error")
+	}
+	if attempts != 0 {
+		t.Fatalf("upstream attempts = %d, want 0", attempts)
+	}
+	if status, ok := err.(interface{ StatusCode() int }); !ok || status.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("error status = %v, want %d", err, http.StatusBadRequest)
+	}
+	if scoped, ok := err.(interface{ IsRequestScoped() bool }); !ok || !scoped.IsRequestScoped() {
+		t.Fatalf("error should be request-scoped: %v", err)
+	}
+	if got := gjson.Get(err.Error(), "error.code").String(); got != "model_text_only" {
+		t.Fatalf("error.code = %q, want model_text_only; error=%v", got, err)
+	}
+	if got := gjson.Get(err.Error(), "error.upstream_model").String(); got != "deepseek-v4-pro" {
+		t.Fatalf("error.upstream_model = %q, want deepseek-v4-pro; error=%v", got, err)
+	}
+}
+
+func TestOpenAICompatExecutorDeepSeekClaudeStreamRejectsNamedToolChoiceBeforeUpstream(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	payload := []byte(`{
+		"model":"deepseek-v4-pro",
+		"max_tokens":32,
+		"tools":[{"name":"read","description":"read","input_schema":{"type":"object","properties":{}}}],
+		"tool_choice":{"type":"tool","name":"read"},
+		"messages":[{"role":"user","content":"read"}],
+		"stream":true
+	}`)
+
+	_, err := executor.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "deepseek-v4-pro",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("claude"),
+		Stream:       true,
+	})
+	if err == nil {
+		t.Fatal("expected named tool-choice compatibility error")
+	}
+	if attempts != 0 {
+		t.Fatalf("upstream attempts = %d, want 0", attempts)
+	}
+	if got := gjson.Get(err.Error(), "error.code").String(); got != "unsupported_tool_choice" {
+		t.Fatalf("error.code = %q, want unsupported_tool_choice; error=%v", got, err)
+	}
+}
+
+func TestOpenAICompatExecutorPreservesUpstreamErrorRequestIDHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-Id", "req_nonstream_123")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"bad request"}}`))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "test-model",
+		Payload: []byte(`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Stream:       false,
+	})
+	if err == nil {
+		t.Fatal("expected upstream error")
+	}
+	headers, ok := err.(interface{ Headers() http.Header })
+	if !ok || headers.Headers().Get("X-Request-Id") != "req_nonstream_123" {
+		t.Fatalf("error headers = %v, want request ID", err)
 	}
 }
 
@@ -200,6 +319,58 @@ func TestOpenAICompatExecutorDeepSeekStreamNormalizesReasoningEcho(t *testing.T)
 	}
 	if got := gjson.GetBytes(gotBody, "messages.2.tool_call_id").String(); got != "call_1" {
 		t.Fatalf("messages.2.tool_call_id = %q, want %q; body=%s", got, "call_1", string(gotBody))
+	}
+}
+
+func TestOpenAICompatExecutorDeepSeekClaudeToolFollowupStreamRestoresReasoning(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	payload := []byte(`{
+		"model":"deepseek-v4-pro",
+		"max_tokens":1024,
+		"thinking":{"type":"enabled","budget_tokens":1024},
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"Read the file"}]},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"exact streamed reasoning","signature":""},
+				{"type":"tool_use","id":"call_1","name":"read","input":{"path":"README.md"}}
+			]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"file contents"}]}
+		],
+		"stream":true
+	}`)
+
+	result, err := executor.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "deepseek-v4-pro",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("claude"),
+		Stream:       true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteStream error: %v", err)
+	}
+	for chunk := range result.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("stream chunk error: %v", chunk.Err)
+		}
+	}
+
+	if got := gjson.GetBytes(gotBody, "messages.1.reasoning_content").String(); got != "exact streamed reasoning" {
+		t.Fatalf("messages.1.reasoning_content = %q, want exact Claude thinking; body=%s", got, string(gotBody))
 	}
 }
 
@@ -552,6 +723,7 @@ func TestRewriteOpenAICompatImagesMultipartPayloadPreservesStreamAndFileContentT
 func TestOpenAICompatExecutorStreamRejectsPlainJSONAfterBlankLines(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Request-Id", "req_stream_123")
 		_, _ = w.Write([]byte("\n\n: openrouter processing\n\nevent: error\n"))
 		_, _ = w.Write([]byte(`{"error":{"message":"upstream failed","type":"server_error"}}` + "\n"))
 	}))
@@ -588,6 +760,9 @@ func TestOpenAICompatExecutorStreamRejectsPlainJSONAfterBlankLines(t *testing.T)
 	}
 	if !strings.Contains(gotErr.Error(), "upstream failed") {
 		t.Fatalf("stream error = %v", gotErr)
+	}
+	if headers, ok := gotErr.(interface{ Headers() http.Header }); !ok || headers.Headers().Get("X-Request-Id") != "req_stream_123" {
+		t.Fatalf("stream error headers = %v, want request ID", gotErr)
 	}
 }
 

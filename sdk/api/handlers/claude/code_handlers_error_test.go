@@ -9,11 +9,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
+	basehandlers "github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
 	"github.com/tidwall/gjson"
 )
 
 func TestClaudeErrorExtractsOpenAIStyleUpstreamJSON(t *testing.T) {
-	handler := &ClaudeCodeAPIHandler{}
+	handler := NewClaudeCodeAPIHandler(&basehandlers.BaseAPIHandler{})
 	msg := &interfaces.ErrorMessage{
 		StatusCode: http.StatusBadRequest,
 		Error:      errors.New(`{"error":{"message":"Your input exceeds the context window of this model. Please adjust your input and try again.","type":"invalid_request_error","code":"context_too_large"}}`),
@@ -47,6 +48,38 @@ func TestClaudeErrorExtractsClaudeStyleUpstreamJSON(t *testing.T) {
 	if got.Error.Message != "This request would exceed your account's rate limit. Please try again later." {
 		t.Fatalf("error.message = %q", got.Error.Message)
 	}
+	if got.RequestID != "req_123" {
+		t.Fatalf("request_id = %q, want req_123", got.RequestID)
+	}
+}
+
+func TestClaudeErrorExtractsRequestIDFromUpstreamHeader(t *testing.T) {
+	handler := &ClaudeCodeAPIHandler{}
+	msg := &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadGateway,
+		Error:      errors.New(`{"error":{"type":"api_error","message":"upstream failed"}}`),
+		Addon:      http.Header{"X-Request-Id": {"req_header_123"}},
+	}
+
+	got := handler.toClaudeError(msg)
+
+	if got.RequestID != "req_header_123" {
+		t.Fatalf("request_id = %q, want req_header_123", got.RequestID)
+	}
+}
+
+func TestClaudeErrorRejectsUnsafeRequestID(t *testing.T) {
+	handler := &ClaudeCodeAPIHandler{}
+	msg := &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadGateway,
+		Error:      errors.New(`{"type":"error","error":{"type":"api_error","message":"upstream failed"},"request_id":"unsafe request id"}`),
+	}
+
+	got := handler.toClaudeError(msg)
+
+	if got.RequestID != "" {
+		t.Fatalf("request_id = %q, want empty", got.RequestID)
+	}
 }
 
 func TestWriteClaudeErrorResponseUsesClaudeEnvelope(t *testing.T) {
@@ -73,6 +106,27 @@ func TestWriteClaudeErrorResponseUsesClaudeEnvelope(t *testing.T) {
 	}
 	if got := gjson.GetBytes(body, "error.message").String(); got != "Your input exceeds the context window of this model. Please adjust your input and try again." {
 		t.Fatalf("error.message = %q; body=%s", got, body)
+	}
+}
+
+func TestWriteClaudeErrorResponseIncludesSafeRequestIDWithoutHeaderPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	handler := NewClaudeCodeAPIHandler(&basehandlers.BaseAPIHandler{})
+	msg := &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadGateway,
+		Error:      errors.New(`{"error":{"type":"api_error","message":"upstream failed"}}`),
+		Addon:      http.Header{"X-Request-Id": {"req_header_123"}},
+	}
+
+	handler.WriteErrorResponse(c, msg)
+
+	if got := gjson.GetBytes(recorder.Body.Bytes(), "request_id").String(); got != "req_header_123" {
+		t.Fatalf("request_id = %q, want req_header_123; body=%s", got, recorder.Body.Bytes())
+	}
+	if got := recorder.Header().Get("X-Request-Id"); got != "" {
+		t.Fatalf("X-Request-Id header = %q, want empty when passthrough is disabled", got)
 	}
 }
 

@@ -22,15 +22,15 @@ This repository is not a conventional browser frontend project. The interactive 
 
 - Repo root: `/root/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
-- Current task: `.osc/tasks/07-29-xai-resin-bootstrap-keepalive`
-- Immediate implication: Claude-compatible xAI streams emit configured downstream SSE heartbeats while Resin waits for the first meaningful payload, and production deployments preserve an explicit Grok inspection timer state.
+- Current task: `.osc/tasks/07-30-fix-claude-deepseek-tool-400`
+- Immediate implication: Claude-origin DeepSeek tool continuations must recover exact source thinking in the OpenAI-compatible executor without weakening the shared translator's signature policy. Text-only image rejection and transient upstream bootstrap failures remain separate compatibility concerns.
 
 **Repo Snapshot**
 - **Modules/Components:** `cmd/server` is the runnable server entrypoint; `internal/{api,auth,cmd,config,logging,managementasset,runtime,store,tui,usage,watcher,wsrelay,...}` contains server-only runtime code; `sdk/{api,auth,cliproxy,config,logging,translator}` is the reusable embedding surface; `docs/`, `examples/`, and `test/` hold consumer docs, samples, and regression coverage. (confidence: High) — evidence: `README.md`, `cmd/server/main.go`, `internal/`, `sdk/`, `docs/`, `examples/`, `test/`
 - **Toolchains:** build uses Go modules plus `go build ./cmd/server`, a multi-stage Docker image, and GoReleaser archives (High); tests exist both as package tests and top-level regressions under `test/`, but the shallow CI inventory only enforces build on pull requests (Medium); no dedicated lint/staticcheck config was found at depth <= 2, so explicit source-format enforcement is mostly standard Go tooling plus review convention (Low). — evidence: `go.mod`, `Dockerfile`, `docker-compose.yml`, `.goreleaser.yml`, `.github/workflows/pr-test-build.yml`, `.github/workflows/release.yaml`, `.github/workflows/docker-image.yml`
 - **Style/Format Enforcement:** the strongest enforced process rules are the `osc` artifact-first workflow, protected `internal/translator/**` PR boundary, and comment-preserving config persistence through management handlers. (confidence: Medium) — evidence: `.osc/workflow.md`, `AGENTS.md`, `CLAUDE.md`, `.github/workflows/pr-path-guard.yml`, `internal/api/handlers/management/config_basic.go`, `internal/api/handlers/management/handler.go`
 - **CI Gates/Expectations:** pull requests must compile `./cmd/server`; pull requests touching `internal/translator/**` are rejected; main/tag pushes publish Docker images, and successful main Docker builds trigger the production deploy workflow. Tag pushes publish GoReleaser artifacts with embedded version metadata. (confidence: High) — evidence: `.github/workflows/pr-test-build.yml`, `.github/workflows/pr-path-guard.yml`, `.github/workflows/docker-image.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/release.yaml`, `.goreleaser.yml`, `Dockerfile`, `deploy/scripts/remote-deploy.sh`
-- **Open Questions (max 1):** None. The Resin routing task is selected and contains its proposal, spec, and task artifacts.
+- **Open Questions (max 1):** The verified DeepSeek reasoning-replay source patch is not yet in the production image; deployment remains an explicit operator delivery step.
 
 ## Product Surfaces
 
@@ -102,6 +102,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 10. Resin exact-402 rotation preserves the stable Account, deletes only that Account's lease through the authenticated internal Resin admin API, and retries only before downstream payload. Retry counts are bounded; generic HTTP bodies must be replayable; WebSocket lease generations prevent reuse of an old tunnel without interrupting unrelated in-flight streams. — Evidence: `internal/runtime/executor/helps/xai_resin_proxy_admin.go`, `internal/runtime/executor/xai_proxy_pool_executor.go`, `internal/runtime/executor/xai_websockets_executor.go`, `deploy/XAI_RESIN_PROXY_SETUP_CN.md` (Documented; confidence: High; added 2026-07-28)
 11. Production deployments must preserve a workflow-provided immutable `CLI_PROXY_IMAGE`; the server `.env` is only a fallback when no explicit image is supplied. Keep this precedence covered by a shell regression that does not invoke Docker or SSH. — Evidence: `.github/workflows/deploy-production.yml`, `deploy/scripts/remote-deploy.sh`, `deploy/scripts/resolve-cli-proxy-image_test.sh` (Documented; confidence: High; added 2026-07-28)
 12. A synchronous streaming bootstrap wait must use the configured downstream SSE keep-alive without changing the executor's first-meaningful-payload boundary. Stop and join any temporary writer before normal response writes resume. Production Grok inspection units must be installed on deploy but enabled or disabled according to `ENABLE_GROK_INSPECTION_TIMER`, which defaults to `true`. — Evidence: `sdk/api/handlers/bootstrap_keepalive.go`, `sdk/api/handlers/claude/code_handlers.go`, `deploy/scripts/configure-grok-inspection-timer.sh`, `deploy/scripts/remote-deploy.sh` (Documented; confidence: High; added 2026-07-29)
+13. Keep unsigned Claude thinking excluded by the shared translator. When a DeepSeek OpenAI-compatible continuation requires `reasoning_content`, recover exact thinking only in the Claude-origin, DeepSeek executor path by matching tool-call IDs; do not apply a global signature-policy relaxation. — Evidence: `internal/runtime/executor/helps/openai_message_links.go`, `internal/runtime/executor/openai_compat_executor.go` (Documented; confidence: High; added 2026-07-30)
 
 #### D) Testing strategy & coverage expectations
 1. Treat `go build -o test-output ./cmd/server` as the minimum must-pass pull-request gate, because that is the explicitly wired PR CI check. — Evidence: `.github/workflows/pr-test-build.yml` (Documented; confidence: High)
@@ -116,7 +117,7 @@ Primary evidence: `config.example.yaml`, `internal/api/handlers/management/`, `i
 
 ### Top 8 Constraints
 
-- Constraint 1: Current source changes should stay within `.osc/tasks/07-29-xai-resin-bootstrap-keepalive` unless a new task is selected.
+- Constraint 1: Current source changes should stay within `.osc/tasks/07-30-fix-claude-deepseek-tool-400` unless a new task is selected.
 - Constraint 2: No source edits are allowed before `.osc/tasks/<task-dir>/changes/proposal.md`, `spec.md`, and `tasks.md` all exist or are updated, unless the user explicitly says to skip the workflow or the task type is `hotfix`/`docs`.
 - Constraint 3: Required repo artifacts do not live only in chat: baseline rules go in `.osc/spec/project-spec.md`, task change packages go in `.osc/tasks/<task-dir>/changes/`, and quality results go in `.osc/quality-gate.md`.
 - Constraint 4: This repository is primarily a Go proxy/server and embeddable SDK, not a bundled browser frontend. UI work in-tree normally means Bubble Tea TUI work or management asset integration.

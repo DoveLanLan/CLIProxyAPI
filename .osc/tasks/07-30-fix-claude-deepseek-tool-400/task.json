@@ -1,0 +1,13 @@
+{
+  "name": "Fix Claude Code DeepSeek tool continuation 400s",
+  "type": "bugfix",
+  "branch": "task/fix-claude-deepseek-tool-400",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [],
+  "status": "in_progress",
+  "current_phase": 1,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "in_progress"
+}
