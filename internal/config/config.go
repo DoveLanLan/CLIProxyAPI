@@ -532,12 +532,20 @@ type ClaudeModel struct {
 
 	// ForceMapping rewrites upstream response model fields back to Alias.
 	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+
+	// Thinking configures the thinking/reasoning capability for this model.
+	// If nil, the model falls back to static registry capabilities (when the
+	// upstream name matches a known model) or no thinking support otherwise.
+	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
 func (m ClaudeModel) GetName() string        { return m.Name }
 func (m ClaudeModel) GetAlias() string       { return m.Alias }
 func (m ClaudeModel) GetDisplayName() string { return m.DisplayName }
 func (m ClaudeModel) GetForceMapping() bool  { return m.ForceMapping }
+func (m ClaudeModel) GetThinking() *registry.ThinkingSupport {
+	return m.Thinking
+}
 
 // CodexKey represents the configuration for a Codex API key,
 // including the API key itself and an optional base URL for the API endpoint.

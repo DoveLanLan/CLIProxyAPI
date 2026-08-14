@@ -329,6 +329,16 @@ nonstream-keepalive-interval: 0
 #         alias: "claude-sonnet-latest"      # client alias mapped to the upstream model
 #         display-name: "Claude Sonnet"      # optional catalog display name
 #         force-mapping: true                 # optional: rewrite response model fields back to the alias
+#         # Optional: declare thinking/reasoning capabilities for upstream models that are
+#         # not in the bundled model registry (e.g. newly released third-party models).
+#         # When omitted, capabilities fall back to the static registry by upstream name.
+#         thinking:
+#           levels: ["none", "low", "medium", "high", "xhigh", "max"] # discrete effort levels
+#           zero-allowed: true             # optional: whether level "none"/budget 0 disables thinking
+#         # thinking:
+#         #   min: 1024                    # alternatively, budget-based thinking (token range)
+#         #   max: 32768
+#         #   zero-allowed: false
 #     excluded-models:
 #       - "claude-opus-4-5-20251101" # exclude specific models (exact match)
 #       - "claude-3-*"               # wildcard matching prefix (e.g. claude-3-7-sonnet-20250219)

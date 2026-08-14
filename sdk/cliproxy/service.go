@@ -2504,6 +2504,13 @@ type modelEntry interface {
 	GetDisplayName() string
 }
 
+// thinkingCapableModelEntry is implemented by model entries that allow an
+// explicit per-model thinking capability override in config
+// (e.g., claude-api-key.models[].thinking).
+type thinkingCapableModelEntry interface {
+	GetThinking() *registry.ThinkingSupport
+}
+
 func buildConfiguredModelInfo(model modelEntry, ownedBy, modelType string, created int64, fallbackDisplayName string, userDefined bool) *ModelInfo {
 	name := strings.TrimSpace(model.GetName())
 	alias := strings.TrimSpace(model.GetAlias())
@@ -2681,7 +2688,12 @@ func buildConfigModels[T modelEntry](models []T, ownedBy, modelType string) []*M
 			continue
 		}
 		seen[key] = struct{}{}
-		if name != "" {
+		// Explicit per-model thinking config takes priority over static registry
+		// capabilities, so unlisted upstream models (e.g. GLM-5.3) can declare
+		// their supported effort levels.
+		if entry, ok := any(model).(thinkingCapableModelEntry); ok && entry.GetThinking() != nil {
+			info.Thinking = cloneThinkingSupport(entry.GetThinking())
+		} else if name != "" {
 			if upstream := registry.LookupStaticModelInfo(name); upstream != nil && upstream.Thinking != nil {
 				info.Thinking = upstream.Thinking
 			}
