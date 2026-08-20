@@ -34,6 +34,38 @@ func TestCleanJSONSchemaForAntigravity_ConstToEnum(t *testing.T) {
 	compareJSON(t, expected, result)
 }
 
+func TestCleanJSONSchemaForAntigravity_AddsMissingArrayItems(t *testing.T) {
+	input := `{
+		"type": "object",
+		"properties": {
+			"cookies": {"type": "array"},
+			"nested": {
+				"type": "object",
+				"properties": {"values": {"type": "array"}}
+			},
+			"explicit": {"type": "array", "items": {"type": "string"}}
+		}
+	}`
+
+	result := gjson.Parse(CleanJSONSchemaForAntigravity(input))
+	if got := result.Get("properties.cookies.items.type").String(); got != "object" {
+		t.Fatalf("cookies.items.type = %q, want object", got)
+	}
+	if got := result.Get("properties.nested.properties.values.items.type").String(); got != "object" {
+		t.Fatalf("nested values.items.type = %q, want object", got)
+	}
+	if got := result.Get("properties.explicit.items.type").String(); got != "string" {
+		t.Fatalf("explicit.items.type = %q, want string", got)
+	}
+}
+
+func TestCleanJSONSchemaForGemini_AddsMissingArrayItems(t *testing.T) {
+	result := gjson.Parse(CleanJSONSchemaForGemini(`{"type":"object","properties":{"cookies":{"type":"array"}}}`))
+	if got := result.Get("properties.cookies.items.type").String(); got != "object" {
+		t.Fatalf("cookies.items.type = %q, want object", got)
+	}
+}
+
 func TestCleanJSONSchemaForAntigravity_TypeFlattening_Nullable(t *testing.T) {
 	input := `{
 		"type": "object",
@@ -903,7 +935,8 @@ func TestCleanJSONSchemaForGemini_RemovesGeminiUnsupportedMetadataFields(t *test
 			},
 			"enumDescriptions": {
 				"type": "array",
-				"description": "property name should not be removed"
+				"description": "property name should not be removed",
+				"items": {"type": "object"}
 			}
 		}
 	}`
@@ -931,7 +964,8 @@ func TestCleanJSONSchemaForGemini_RemovesGeminiUnsupportedMetadataFields(t *test
 			},
 			"enumDescriptions": {
 				"type": "array",
-				"description": "property name should not be removed"
+				"description": "property name should not be removed",
+				"items": {"type": "object"}
 			}
 		}
 	}`

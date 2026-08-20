@@ -55,7 +55,30 @@ func cleanJSONSchema(jsonStr string, addPlaceholder bool) string {
 	if addPlaceholder {
 		jsonStr = addEmptySchemaPlaceholder(jsonStr)
 	}
+	// Gemini/Antigravity require every array schema to declare its element
+	// schema. Some Claude Code tools omit `items` for arrays whose element type
+	// is intentionally open-ended (for example, browser cookie collections).
+	// Use a permissive object element so the upstream request remains valid
+	// without inventing required fields or changing arrays that are explicit.
+	jsonStr = addMissingArrayItems(jsonStr)
 
+	return jsonStr
+}
+
+func addMissingArrayItems(jsonStr string) string {
+	paths := findPaths(jsonStr, "type")
+	sortByDepth(paths)
+	for _, p := range paths {
+		if gjson.Get(jsonStr, p).String() != "array" {
+			continue
+		}
+		parentPath := trimSuffix(p, ".type")
+		itemsPath := joinPath(parentPath, "items")
+		if gjson.Get(jsonStr, itemsPath).Exists() {
+			continue
+		}
+		jsonStr = setRawAt(jsonStr, itemsPath, `{"type":"object"}`)
+	}
 	return jsonStr
 }
 
