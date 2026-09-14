@@ -20,6 +20,29 @@ This repository is not a conventional browser frontend project. The interactive 
 
 ## Current OSC Context
 
+### 2026-09-14 Incremental Planning Note
+
+- Implemented: `commandcode-api-key` is a native in-process provider. Configured
+  models take priority; omitted lists use bounded discovery at auth registration,
+  disabled by `--local-model`. Its raw OpenAI stream is incremental; existing
+  stateful response translators receive size-limited input. Evidence:
+  `internal/runtime/executor/commandcode_executor.go`,
+  `internal/runtime/executor/helps/commandcode_stream.go`,
+  `sdk/cliproxy/commandcode_models.go`, `docs/COMMANDCODE.md`.
+  (Documented; confidence: High)
+
+- Active planning task: `.osc/tasks/09-14-commandcode-provider`; prior task context
+  below is historical and does not constrain this new feature.
+- Built-in API-key providers integrate through configuration, watcher synthesis,
+  service executor/model registration, and shared usage/translation interfaces.
+  Evidence: `internal/config/config.go`, `internal/watcher/synthesizer/config.go`,
+  `sdk/cliproxy/service.go`, `internal/runtime/executor/kimi_executor.go`.
+  (Inferred; confidence: High)
+- Command Code integration must remain in-process and preserve canonical thinking
+  and the prohibition on new post-connect timeouts. Supporting executor code goes
+  under `internal/runtime/executor/helps/`. Evidence: user requirement and `AGENTS.md`.
+  (Documented; confidence: High)
+
 - Repo root: `/root/Projects/Go/src/CLIProxyAPI`
 - Developer: `hewei`
 - Current task: `.osc/tasks/07-30-fix-claude-deepseek-tool-400`

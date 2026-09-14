@@ -1,66 +1,151 @@
-# Quality gate: Claude Code DeepSeek tool continuation 400s
+# Quality Gate Report
 
-Date: 2026-07-30
-Task: `.osc/tasks/07-30-fix-claude-deepseek-tool-400`
-Status: PASS; PRODUCTION DEPLOYMENT VERIFIED; PROVIDER REVOCATION PENDING
+- Trigger: manual
+- Started At: 2026-09-14T09:58:34Z
+- Finished At: 2026-09-14T09:58:40Z
+- Command: `go test ./...`
+- Status: PASS
+- Exit Code: 0
+- Log File: `.osc/.tmp/gate-last.log`
 
-## Changed scope
+## Output Excerpt (last 120 lines)
 
-- DeepSeek-only recovery of exact Claude thinking for OpenAI-compatible tool
-  continuations.
-- Pre-dispatch structured rejection for DeepSeek text-only image input and forced
-  named tool choice.
-- Safe Claude-compatible upstream error type/message/request-ID preservation.
-- DeepSeek-only local interleaved-thinking negotiation disablement and image/PDF
-  `Read` guard.
-- One production pre-payload streaming bootstrap retry.
-- No Claude Code binary changes, no global reasoning disablement, and no changes
-  under `internal/translator/**`.
+## Command Code Supplemental Checks
 
-## Gates
+- PASS: focused Command Code race tests across helpers/executor/synthesizer/service/auth.
+- PASS: required native server build; generated `test-output` was removed after verification.
+- PASS: Linux amd64 `CGO_ENABLED=0` server build, verified as a statically linked ELF.
+- PASS: final `gofmt -l .` and `git diff --check`.
+- PASS: event-conversion microbenchmark (darwin arm64, Apple M5): 9,787 ns/op,
+  2,321 B/op, 38 allocs/op; not an RSS measurement.
+- Self-review: bounded cached/event state; exact-case credential isolation; no new
+  dependencies, shared-translator changes, fabricated signatures or network deadlines.
+- Not run: real-account upstream validation or VPS deployment/memory measurements.
+- Task details: `.osc/tasks/09-14-commandcode-provider/changes/regression-checklist.md`.
+- Environment note: the runner's pre-existing bash/zsh fzf initialization warnings
+  did not prevent Go tests from passing; no shell-profile changes were made.
 
-| Command or check | Result |
-|---|---|
-| `gofmt -w .` | PASS |
-| `go test ./internal/runtime/executor/helps ./internal/runtime/executor` | PASS |
-| `go test ./sdk/api/handlers/claude` | PASS |
-| Focused changed-path `go test -race` runs | PASS |
-| `go test ./...` | PASS |
-| `go build -o test-output ./cmd/server && rm test-output` | PASS |
-| `git diff --check` | PASS |
-| Changed-path guard for `internal/translator/**` | PASS |
-| Credential-pattern scan of repository changes | PASS |
+### Raw Test Output
 
-## Behavior verification
+```text
+/opt/homebrew/opt/fzf/shell/key-bindings.zsh: line 24: syntax error near unexpected token `)'
+/opt/homebrew/opt/fzf/shell/key-bindings.zsh: line 24: `  () {'
+/Users/hewei/.config/fzf/init.zsh: line 26: ((: $+functions[_fzf_compgen_path] : syntax error: operand expected (error token is "$+functions[_fzf_compgen_path] ")
+/opt/homebrew/opt/fzf/shell/completion.zsh: line 40: syntax error near unexpected token `)'
+/opt/homebrew/opt/fzf/shell/completion.zsh: line 40: `  () {'
+/opt/homebrew/opt/fzf/shell/completion.zsh: line 40: syntax error near unexpected token `)'
+/opt/homebrew/opt/fzf/shell/completion.zsh: line 40: `  () {'
+?   	github.com/router-for-me/CLIProxyAPI/v7/cmd/fetch_antigravity_models	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/cmd/fetch_codex_models	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/cmd/server	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/cmd/validate_codex_models	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/examples/custom-provider	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/examples/http-request	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/examples/translator	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/access	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/access/config_access	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/api	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/api/handlers/management	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/api/middleware	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/auth	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/auth/antigravity	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/auth/claude	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/auth/empty	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kimi	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/auth/vertex	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/browser	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/buildinfo	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/cache	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/cmd	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/config	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/constant	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/home	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/homeplugins	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/htmlsanitize	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/httpfetch	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/logging	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/misc	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/pluginstore	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/registry	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor	2.626s
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/safemode	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/signature	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/store	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/antigravity	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/claude	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/codex	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/gemini	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/interactions	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/kimi	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/openai	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/xai	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator	(cached) [no tests to run]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/antigravity/claude	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/antigravity/gemini	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/antigravity/interactions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/antigravity/openai/chat-completions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/antigravity/openai/responses	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/claude/gemini	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/claude/interactions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/claude/openai/chat-completions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/claude/openai/responses	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/codex/claude	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/codex/gemini	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/codex/interactions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/codex/openai/chat-completions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/codex/openai/responses	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/common	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/claude	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/common	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/gemini	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/interactions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/openai/chat-completions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/openai/responses	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/interactions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/interactions/claude	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/claude	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/gemini	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/interactions/chat-completions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/interactions/responses	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/chat-completions	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/responses	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/translator/translator	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/tui	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/util	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/watcher	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/diff	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/synthesizer	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/internal/wsrelay	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/access	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/sdk/api	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers/claude	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers/gemini	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers/openai	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/auth	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy	2.195s
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/pipeline	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/sdk/config	[no test files]
+?   	github.com/router-for-me/CLIProxyAPI/v7/sdk/logging	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginhost	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginstore	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil	(cached)
+ok  	github.com/router-for-me/CLIProxyAPI/v7/sdk/translator	(cached)
+?   	github.com/router-for-me/CLIProxyAPI/v7/sdk/translator/builtin	[no test files]
+ok  	github.com/router-for-me/CLIProxyAPI/v7/test	(cached)
 
-- Small plain-text, single-tool, sequential-tool, and parallel-tool requests pass.
-- Empty signatures and interleaved tool calls alone do not reproduce generic 400.
-- A PNG tool result consistently reproduces the text-only upstream 400.
-- The local DeepSeek hook blocks a real image `Read` before API submission.
-- Executor tests confirm image and named-tool-choice errors make no upstream request,
-  remain request-scoped, and carry a structured compatibility code/model.
-- Claude handler tests confirm valid upstream JSON and safe request IDs survive error
-  conversion without enabling response-header passthrough.
-- Default wrapper launch remains max effort; a trailing explicit xhigh override wins.
-- Production watcher loaded `streaming.bootstrap-retries: 1` without restart.
-
-## Delivery note
-
-Commits `aa2cbf95` and `5bf14e5d` are pushed to `main`. Final Docker workflow
-`30521223617` and deployment workflow `30521315577` succeeded. Production runs
-`ghcr.io/dovelanlan/cliproxyapi:sha-5bf14e5d21925dbd915336cf37ac0f3b46aeb20e`;
-the OCI revision matches, both public and Tailscale health checks return 200, and
-host/container configuration views share one inode with `bootstrap-retries: 1`.
-
-The final production matrix returns 200 for plain text and empty-signature reasoning
-tool continuation. Image and named tool choice return local structured 400 errors
-with `model_text_only` or `unsupported_tool_choice` plus the actual model identifier.
-
-## Security note
-
-No tokens or full sensitive request bodies are recorded in repository artifacts.
-The local debug log remains mode 600 and must not be copied verbatim. The exposed
-OpenCode credential is removed from active production config and its entry is
-disabled; fallback production checks pass. Root-only mode 600 emergency backups
-still contain it. Provider-side revocation/regeneration remains blocked on an
-authenticated OpenCode control-plane session.
+[osc] gate exit=0
+```
