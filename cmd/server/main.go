@@ -145,6 +145,7 @@ func main() {
 
 	// Parse the command-line flags.
 	flag.Parse()
+	registry.SetLocalModelsOnly(localModel)
 
 	// Core application variables.
 	var err error

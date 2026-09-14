@@ -123,6 +123,9 @@ type Config struct {
 	// InteractionsKey defines native Google Interactions API key configurations.
 	InteractionsKey []GeminiKey `yaml:"interactions-api-key" json:"interactions-api-key"`
 
+	// CommandCodeKey configures the native Command Code provider.
+	CommandCodeKey []GeminiKey `yaml:"commandcode-api-key" json:"commandcode-api-key"`
+
 	// Codex defines a list of Codex API key configurations as specified in the YAML configuration file.
 	CodexKey []CodexKey `yaml:"codex-api-key" json:"codex-api-key"`
 
@@ -859,6 +862,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Sanitize Gemini API key configuration and migrate legacy entries.
 	cfg.SanitizeGeminiKeys()
+	cfg.CommandCodeKey = sanitizeGeminiKeyEntries(cfg.CommandCodeKey)
 
 	// Sanitize native Interactions API key configuration.
 	cfg.SanitizeInteractionsKeys()

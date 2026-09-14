@@ -16,6 +16,9 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg == nil || newCfg == nil {
 		return changes
 	}
+	if !reflect.DeepEqual(oldCfg.CommandCodeKey, newCfg.CommandCodeKey) {
+		changes = append(changes, fmt.Sprintf("commandcode-api-key configuration updated (%d -> %d entries)", len(oldCfg.CommandCodeKey), len(newCfg.CommandCodeKey)))
+	}
 
 	// Simple scalars
 	if oldCfg.Port != newCfg.Port {

@@ -32,6 +32,7 @@ func (s *ConfigSynthesizer) Synthesize(ctx *SynthesisContext) ([]*coreauth.Auth,
 	out = append(out, s.synthesizeGeminiKeys(ctx)...)
 	// Native Interactions API Keys
 	out = append(out, s.synthesizeInteractionsKeys(ctx)...)
+	out = append(out, s.synthesizeGeminiKeyEntries(ctx, ctx.Config.CommandCodeKey, "commandcode:apikey", "commandcode", "commandcode-apikey", "commandcode")...)
 	// Claude API Keys
 	out = append(out, s.synthesizeClaudeKeys(ctx)...)
 	// Codex API Keys

@@ -32,6 +32,10 @@ auths/*
 
 # Documentation
 docs/*
+!docs/COMMANDCODE.md
+!docs/licenses/
+docs/licenses/*
+!docs/licenses/commandcode-proxy.txt
 AGENTS.md
 CLAUDE.md
 GEMINI.md

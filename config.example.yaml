@@ -385,6 +385,25 @@ nonstream-keepalive-interval: 0
 #   user-agent: "codex_cli_rs/0.114.0 (Mac OS 14.2.0; x86_64) vscode/1.111.0"
 #   beta-features: "multi_agent"
 
+# Native Command Code provider (no Node.js sidecar required).
+# Configure explicit models for predictable startup on memory-constrained hosts.
+# If models is omitted, discovery runs on credential registration and is cached
+# for 5 minutes; --local-model disables this discovery.
+# commandcode-api-key:
+#   - api-key: "user_REPLACE_ME"
+#     prefix: "cc"
+#     # base-url: "https://api.commandcode.ai" # Root URL, without /v1.
+#     # proxy-url: "direct"                   # Or a per-key HTTP/SOCKS proxy.
+#     # priority: 0
+#     # disable-cooling: false
+#     # headers:
+#     #   x-cmd-zdr: "1" # Requests upstream ZDR routing; not a retention guarantee.
+#     models:
+#       - name: "YOUR_UPSTREAM_MODEL_ID"
+#         alias: "my-model"
+#     # excluded-models: ["excluded-model-id"]
+# See docs/COMMANDCODE.md for protocol and memory limits.
+
 # OpenAI compatibility providers
 # openai-compatibility:
 #   - name: "openrouter" # The name of the provider; it will be used in the user agent and other places.
