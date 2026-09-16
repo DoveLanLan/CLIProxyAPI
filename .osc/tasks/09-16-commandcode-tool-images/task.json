@@ -1,0 +1,7 @@
+{
+  "name": "Fix Command Code Chat tool image placement",
+  "type": "bugfix",
+  "status": "in_progress",
+  "requires_change_workflow": true,
+  "change_workflow_status": "verifying_production"
+}

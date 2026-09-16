@@ -20,6 +20,19 @@ This repository is not a conventional browser frontend project. The interactive 
 
 ## Current OSC Context
 
+### 2026-09-16 Chat Tool Image Placement
+
+- OpenAI-compatible Chat tool results carry text, not image_url parts. Move tool
+  images to an annotated user message after the contiguous tool-result group,
+  preserving tool-call IDs and image metadata. Do not interrupt parallel tool
+  results. Evidence: `internal/runtime/executor/helps/openai_tool_images.go`,
+  `internal/runtime/executor/openai_compat_executor_vision_test.go`.
+  (Documented; confidence: High)
+- Strict role/content mocks and real Claude Code Read acceptance are required for
+  this path; checking image presence alone missed the production schema failure.
+  Evidence: `.osc/tasks/09-16-commandcode-tool-images/changes/`.
+  (Documented; confidence: High)
+
 ### 2026-09-16 DeepSeek Vision Correction
 
 - DeepSeek reasoning-echo requirements do not imply text-only input. Delegate

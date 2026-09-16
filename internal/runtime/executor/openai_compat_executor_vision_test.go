@@ -27,6 +27,17 @@ func TestOpenAICompatExecutorDeepSeekClaudeForwardsImages(t *testing.T) {
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						gotPath = r.URL.Path
 						gotBody, _ = io.ReadAll(r.Body)
+						for _, message := range gjson.GetBytes(gotBody, "messages").Array() {
+							if message.Get("role").String() == "tool" {
+								for _, part := range message.Get("content").Array() {
+									if part.Get("type").String() == "image_url" {
+										w.WriteHeader(http.StatusBadRequest)
+										_, _ = io.WriteString(w, `{"error":{"message":"Invalid input"}}`)
+										return
+									}
+								}
+							}
+						}
 						if stream {
 							w.Header().Set("Content-Type", "text/event-stream")
 							_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
@@ -68,6 +79,9 @@ func TestOpenAICompatExecutorDeepSeekClaudeForwardsImages(t *testing.T) {
 					for _, message := range gjson.GetBytes(gotBody, "messages").Array() {
 						for _, part := range message.Get("content").Array() {
 							if part.Get("type").String() == "image_url" {
+								if message.Get("role").String() != "user" {
+									t.Fatalf("image must be carried by user, got %s", message.Raw)
+								}
 								images++
 								if got := part.Get("image_url.url").String(); got != imageURL {
 									t.Fatalf("image URL = %q, want %q", got, imageURL)

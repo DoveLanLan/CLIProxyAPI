@@ -147,6 +147,12 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 			return resp, err
 		}
 	}
+	if to == sdktranslator.FromString("openai") {
+		translated, err = helps.NormalizeOpenAIToolImages(translated)
+		if err != nil {
+			return resp, err
+		}
+	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
 	url := strings.TrimSuffix(baseURL, "/") + endpoint
@@ -364,6 +370,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		if err != nil {
 			return nil, err
 		}
+	}
+	translated, err = helps.NormalizeOpenAIToolImages(translated)
+	if err != nil {
+		return nil, err
 	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
