@@ -153,11 +153,12 @@ func TestOpenAICompatExecutorDeepSeekClaudeToolFollowupAddsReasoningEcho(t *test
 	}
 }
 
-func TestOpenAICompatExecutorDeepSeekClaudeRejectsImageBeforeUpstream(t *testing.T) {
+func TestOpenAICompatExecutorDeepSeekClaudePreservesUpstreamImageError(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Images unavailable on this deployment","code":"upstream_vision_unavailable"}}`))
 	}))
 	defer server.Close()
 
@@ -185,20 +186,14 @@ func TestOpenAICompatExecutorDeepSeekClaudeRejectsImageBeforeUpstream(t *testing
 	if err == nil {
 		t.Fatal("expected image compatibility error")
 	}
-	if attempts != 0 {
-		t.Fatalf("upstream attempts = %d, want 0", attempts)
+	if attempts != 1 {
+		t.Fatalf("upstream attempts = %d, want 1", attempts)
 	}
 	if status, ok := err.(interface{ StatusCode() int }); !ok || status.StatusCode() != http.StatusBadRequest {
 		t.Fatalf("error status = %v, want %d", err, http.StatusBadRequest)
 	}
-	if scoped, ok := err.(interface{ IsRequestScoped() bool }); !ok || !scoped.IsRequestScoped() {
-		t.Fatalf("error should be request-scoped: %v", err)
-	}
-	if got := gjson.Get(err.Error(), "error.code").String(); got != "model_text_only" {
-		t.Fatalf("error.code = %q, want model_text_only; error=%v", got, err)
-	}
-	if got := gjson.Get(err.Error(), "error.upstream_model").String(); got != "deepseek-v4-pro" {
-		t.Fatalf("error.upstream_model = %q, want deepseek-v4-pro; error=%v", got, err)
+	if got := gjson.Get(err.Error(), "error.code").String(); got != "upstream_vision_unavailable" {
+		t.Fatalf("error.code = %q, want upstream_vision_unavailable; error=%v", got, err)
 	}
 }
 

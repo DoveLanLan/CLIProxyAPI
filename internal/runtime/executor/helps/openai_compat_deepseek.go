@@ -8,7 +8,7 @@ import (
 )
 
 // DeepSeekClaudeCompatibilityIssue describes a request shape that the
-// configured text-only DeepSeek OpenAI-compatible upstream cannot accept.
+// configured DeepSeek OpenAI-compatible upstream cannot accept.
 type DeepSeekClaudeCompatibilityIssue struct {
 	Code    string
 	Message string
@@ -25,12 +25,8 @@ func DetectDeepSeekClaudeCompatibilityIssue(body []byte, model string) (DeepSeek
 	if model == "" {
 		model = "DeepSeek"
 	}
-	if claudeMessagesContainImage(gjson.GetBytes(body, "messages")) {
-		return DeepSeekClaudeCompatibilityIssue{
-			Code:    "model_text_only",
-			Message: fmt.Sprintf("Model %s only supports text input; remove image blocks or use a vision-capable model", model),
-		}, true
-	}
+	// Vision support varies by model and upstream. Let the upstream validate
+	// translated images instead of treating the whole DeepSeek family as text-only.
 
 	toolChoice := gjson.GetBytes(body, "tool_choice")
 	if toolChoice.IsObject() && strings.EqualFold(strings.TrimSpace(toolChoice.Get("type").String()), "tool") {
@@ -41,39 +37,4 @@ func DetectDeepSeekClaudeCompatibilityIssue(body []byte, model string) (DeepSeek
 	}
 
 	return DeepSeekClaudeCompatibilityIssue{}, false
-}
-
-func claudeMessagesContainImage(messages gjson.Result) bool {
-	if !messages.IsArray() {
-		return false
-	}
-	for _, message := range messages.Array() {
-		if claudeContentContainsImage(message.Get("content")) {
-			return true
-		}
-	}
-	return false
-}
-
-func claudeContentContainsImage(content gjson.Result) bool {
-	if content.IsArray() {
-		for _, part := range content.Array() {
-			if claudeContentContainsImage(part) {
-				return true
-			}
-		}
-		return false
-	}
-	if !content.IsObject() {
-		return false
-	}
-
-	partType := strings.ToLower(strings.TrimSpace(content.Get("type").String()))
-	if partType == "image" {
-		return true
-	}
-	if partType == "tool_result" {
-		return claudeContentContainsImage(content.Get("content"))
-	}
-	return false
 }

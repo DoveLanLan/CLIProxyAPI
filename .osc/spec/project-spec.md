@@ -20,6 +20,18 @@ This repository is not a conventional browser frontend project. The interactive 
 
 ## Current OSC Context
 
+### 2026-09-16 DeepSeek Vision Correction
+
+- DeepSeek reasoning-echo requirements do not imply text-only input. Delegate
+  image capability validation to the configured upstream; do not reject Claude
+  image blocks based on a `deepseek-` model prefix. Existing translators preserve
+  images as Chat `image_url` parts, including nested tool results. Evidence:
+  `internal/runtime/executor/helps/openai_compat_deepseek.go`,
+  `internal/runtime/executor/openai_compat_executor_vision_test.go`.
+  (Documented; confidence: High)
+- Fix artifacts: `.osc/tasks/09-16-deepseek-vision/changes/`. Local verification
+  does not imply production deployment or Command Code live vision acceptance.
+
 ### 2026-09-14 Incremental Planning Note
 
 - Implemented: `commandcode-api-key` is a native in-process provider. Configured

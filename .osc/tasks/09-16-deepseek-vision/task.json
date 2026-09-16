@@ -1,0 +1,7 @@
+{
+  "name": "Fix DeepSeek vision preflight rejection",
+  "type": "bugfix",
+  "status": "done",
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed"
+}

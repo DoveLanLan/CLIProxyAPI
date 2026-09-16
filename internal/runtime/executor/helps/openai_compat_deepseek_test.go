@@ -2,7 +2,7 @@ package helps
 
 import "testing"
 
-func TestDetectDeepSeekClaudeCompatibilityIssueImage(t *testing.T) {
+func TestDetectDeepSeekClaudeCompatibilityIssueAllowsImages(t *testing.T) {
 	body := []byte(`{
 		"messages":[{"role":"user","content":[{
 			"type":"tool_result",
@@ -14,12 +14,10 @@ func TestDetectDeepSeekClaudeCompatibilityIssueImage(t *testing.T) {
 		}]}]
 	}`)
 
-	issue, ok := DetectDeepSeekClaudeCompatibilityIssue(body, "deepseek-v4-pro")
-	if !ok {
-		t.Fatal("expected image compatibility issue")
-	}
-	if issue.Code != "model_text_only" {
-		t.Fatalf("issue.Code = %q, want model_text_only", issue.Code)
+	for _, model := range []string{"deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash", "deepseek-v4-pro", "deepseek-future"} {
+		if issue, ok := DetectDeepSeekClaudeCompatibilityIssue(body, model); ok {
+			t.Fatalf("model %s: unexpected compatibility issue %#v", model, issue)
+		}
 	}
 }
 
