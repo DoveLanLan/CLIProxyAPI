@@ -22,6 +22,25 @@ these answers were supplied in the prompt or filename.
 - After (patched local binary -> production Chat endpoint -> Command Code):
   session e087678b-b0d2-4db3-8fb8-f2a5e441e69a. Two turns, exit 0, is_error false,
   correct text and all three colors/shapes. Local requests c3cbe90e/e638e1f0 both 200.
-- Direct deployed production test: pending.
+- PASS: direct deployed production test, 2026-09-16 18:14 Asia/Shanghai.
+  Image: `ghcr.io/dovelanlan/cliproxyapi:sha-bff1543200ec7415e408145860772df82a834f8a`.
+  Claude session `5ddaae23-e15c-46ec-8d78-bd8ed38c3cf5`, two turns, exit 0,
+  `is_error: false`, `passed: true`. Correctly read VISION CHECK 7392, red square,
+  blue circle, green triangle. Prompt did not disclose these answers.
+  Server requests `8908bd22` and `96d84588` returned 200 and selected commandcode.
+- PASS: direct production non-streaming Chat request with mixed text/image result
+  and a second parallel tool result: request `872de0c7`, HTTP 200, correct answer.
+- PASS: GitHub docker-image run 35083627069 and deploy-production run 35083768330.
+- PASS: `node --check` on the reusable CLI smoke script.
+- Local test relay and binary stopped after acceptance; production config unchanged.
+
+## Repeatable CLI acceptance
+
+Use `rsvg-convert vision-card.svg -o /tmp/vision-card.png` from this directory,
+then run `node claude-vision-smoke.cjs <existing-settings.json> /tmp/vision-card.png`.
+The settings file must contain the existing CPA base URL and auth environment.
+The script uses Claude Code's bare mode and Read-only tools, checks actual image
+tool output and the answer, and exits nonzero on failure. No credentials are
+written to the repository or printed. Each run makes small billable model calls.
 
 OSC shell startup emits existing fzf/zsh warnings; gate exit status is zero.

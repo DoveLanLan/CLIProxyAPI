@@ -7,7 +7,10 @@
   identified synthetic image text/colors/shapes through the patched local binary
   connected to the real production Command Code route.
 - No public translator, timeout, credentials, or configuration changes.
-- Direct post-deployment acceptance pending; task evidence and rollback are under
+- Direct post-deployment acceptance PASSED on bff15432: Claude Code Read recognized
+  the test image, and parallel mixed-content Chat returned HTTP 200. GitHub build
+  35083627069 and deployment 35083768330 succeeded. Reusable smoke script syntax
+  check passed; temporary local services stopped. Evidence and rollback are under
   `.osc/tasks/09-16-commandcode-tool-images/changes/`.
 
 - Trigger: manual

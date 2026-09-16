@@ -11,4 +11,6 @@ helper. No translator, credentials, configuration, or timeout changes.
 
 Claude Code 2.1.273 reproduced the failure before the change; the patched local
 binary forwarding through production to Command Code correctly recognized the
-synthetic test card. Direct production acceptance is pending automated deployment.
+synthetic test card. Direct production acceptance also passed after automated
+deployment of bff1543200ec7415e408145860772df82a834f8a. Claude Code Read and a
+separate mixed-content parallel-tool test both correctly identified the image.
