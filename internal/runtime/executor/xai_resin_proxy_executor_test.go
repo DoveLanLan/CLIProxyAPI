@@ -16,10 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 type executorResinProxy struct {
@@ -185,7 +185,7 @@ func TestXAIExecuteWithResinRotatesLeaseAndRetriesExact402(t *testing.T) {
 
 	result, errExecute := executeXAIWithProxyPool(context.Background(), exec, auth, func(routed *cliproxyauth.Auth) (string, error) {
 		attempts++
-		targets = append(targets, xaiProxySessionTarget(routed))
+		targets = append(targets, xaiProxySessionTarget(context.Background(), nil, routed))
 		if attempts < 3 {
 			return "", blockedSpendingLimitError()
 		}
@@ -234,7 +234,7 @@ func TestXAIExecuteWithResinKeepsNetworkAnd402RetryBudgetsIndependent(t *testing
 	if attempts[0] != attempts[1] {
 		t.Fatalf("network retry changed routed auth: %#v", attempts)
 	}
-	if attempts[2] == attempts[1] || xaiProxySessionTarget(attempts[2]) == xaiProxySessionTarget(attempts[1]) {
+	if attempts[2] == attempts[1] || xaiProxySessionTarget(context.Background(), nil, attempts[2]) == xaiProxySessionTarget(context.Background(), nil, attempts[1]) {
 		t.Fatalf("402 retry did not rebuild the rotated route: %#v", attempts)
 	}
 	if got := resin.rotationCalls(); len(got) != 1 || got[0] != auth.ID {
@@ -432,8 +432,8 @@ func TestXAIResinWebsocketTargetDiffersPerAuth(t *testing.T) {
 	if errFirst != nil || errSecond != nil {
 		t.Fatalf("route errors = %v, %v", errFirst, errSecond)
 	}
-	if xaiProxySessionTarget(first.auth) == xaiProxySessionTarget(second.auth) {
-		t.Fatalf("Resin websocket targets unexpectedly match: %q", xaiProxySessionTarget(first.auth))
+	if xaiProxySessionTarget(context.Background(), nil, first.auth) == xaiProxySessionTarget(context.Background(), nil, second.auth) {
+		t.Fatalf("Resin websocket targets unexpectedly match: %q", xaiProxySessionTarget(context.Background(), nil, first.auth))
 	}
 }
 
@@ -717,7 +717,7 @@ func TestXAIResinStreamKeeps402AndNetworkRetryBudgetsIndependent(t *testing.T) {
 	if len(attempts) != 3 || chunk.Err != nil || string(chunk.Payload) != "ok" {
 		t.Fatalf("attempts/chunk = %d/%#v", len(attempts), chunk)
 	}
-	if attempts[0] == attempts[1] || xaiProxySessionTarget(attempts[0]) == xaiProxySessionTarget(attempts[1]) {
+	if attempts[0] == attempts[1] || xaiProxySessionTarget(context.Background(), nil, attempts[0]) == xaiProxySessionTarget(context.Background(), nil, attempts[1]) {
 		t.Fatalf("402 retry did not rebuild the rotated route: %#v", attempts)
 	}
 	if attempts[1] != attempts[2] {

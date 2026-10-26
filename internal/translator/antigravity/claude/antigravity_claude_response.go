@@ -15,9 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/cache"
-	translatorcommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/common"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/cache"
+	sigcompat "github.com/router-for-me/CLIProxyAPI/v8/internal/signature"
+	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/tidwall/gjson"
@@ -41,10 +42,16 @@ func decodeSignature(signature string) string {
 	return signature
 }
 
-func formatClaudeSignatureValue(modelName, signature string) string {
-	if cache.SignatureCacheEnabled() {
-		return fmt.Sprintf("%s#%s", cache.GetModelGroup(modelName), signature)
+func formatGeminiClaudeCarrierValue(modelName, signature, direction, targetKind string) string {
+	if sigcompat.SignatureProviderFromModelName(modelName) == sigcompat.SignatureProviderGemini {
+		return encodeGeminiClaudeCarrierSignature(signature, direction, targetKind)
 	}
+	return formatClaudeSignatureValue(modelName, signature)
+}
+
+func formatClaudeSignatureValue(modelName, signature string) string {
+	// Provider signatures are emitted as provider-native opaque values without
+	// CPA-specific prefixes (such as claude#, gemini#, or gpt#).
 	if cache.GetModelGroup(modelName) == "claude" {
 		return decodeSignature(signature)
 	}
@@ -55,34 +62,54 @@ func formatClaudeSignatureValue(modelName, signature string) string {
 // This structure tracks the current state of the response translation process to ensure
 // proper sequencing of SSE events and transitions between different content types.
 type Params struct {
-	HasFirstResponse     bool   // Indicates if the initial message_start event has been sent
-	ResponseType         int    // Current response type: 0=none, 1=content, 2=thinking, 3=function
-	ResponseIndex        int    // Index counter for content blocks in the streaming response
-	HasFinishReason      bool   // Tracks whether a finish reason has been observed
-	FinishReason         string // The finish reason string returned by the provider
-	HasUsageMetadata     bool   // Tracks whether usage metadata has been observed
-	PromptTokenCount     int64  // Cached prompt token count from usage metadata
-	CandidatesTokenCount int64  // Cached candidate token count from usage metadata
-	ThoughtsTokenCount   int64  // Cached thinking token count from usage metadata
-	TotalTokenCount      int64  // Cached total token count from usage metadata
-	CachedTokenCount     int64  // Cached content token count (indicates prompt caching)
-	HasSentFinalEvents   bool   // Indicates if final content/message events have been sent
-	HasToolUse           bool   // Indicates if tool use was observed in the stream
-	HasContent           bool   // Tracks whether any content (text, thinking, or tool use) has been output
-	HasWebSearchTool     bool
-	WebSearchRequests    int64
-	WebSearchTextBuffer  strings.Builder
+	ModelName               string // Resolved once from the translated request
+	WebSearchStreamMode     bool   // Resolved once from both request formats
+	RequestMetadataResolved bool   // Also caches empty model names and disabled web search
+	HasFirstResponse        bool   // Indicates if the initial message_start event has been sent
+	ResponseType            int    // Current response type: 0=none, 1=content, 2=thinking, 3=function
+	ResponseIndex           int    // Index counter for content blocks in the streaming response
+	HasFinishReason         bool   // Tracks whether a finish reason has been observed
+	FinishReason            string // The finish reason string returned by the provider
+	HasUsageMetadata        bool   // Tracks whether usage metadata has been observed
+	PromptTokenCount        int64  // Cached prompt token count from usage metadata
+	CandidatesTokenCount    int64  // Cached candidate token count from usage metadata
+	ThoughtsTokenCount      int64  // Cached thinking token count from usage metadata
+	TotalTokenCount         int64  // Cached total token count from usage metadata
+	CachedTokenCount        int64  // Cached content token count (indicates prompt caching)
+	HasSentFinalEvents      bool   // Indicates if final content/message events have been sent
+	HasToolUse              bool   // Indicates if tool use was observed in the stream
+	HasContent              bool   // Tracks whether any content (text, thinking, or tool use) has been output
+	HasSemanticContent      bool
+	LastSemanticKind        string
+	HasWebSearchTool        bool
+	WebSearchRequests       int64
+	WebSearchTextBuffer     strings.Builder
 
 	// Signature caching support
-	CurrentThinkingText strings.Builder // Accumulates thinking text for signature caching
+	CurrentThinkingText   strings.Builder // Accumulates thinking text for signature caching
+	CurrentThinkingSigned bool            // Tracks whether the active thinking block already has its terminal signature
 
 	// Reverse map: sanitized Gemini function name → original Claude tool name.
 	// Populated lazily on the first response chunk from the original request JSON.
 	ToolNameMap map[string]string
+
+	CurrentToolName            string // Client-facing name of the currently open tool_use block
+	CurrentToolIsParameterless bool   // Whether the open tool_use block was declared parameterless
+	CurrentToolInputEmitted    bool   // Whether cleaned input JSON was already emitted for the open tool_use block
+	CurrentToolPendingEmpty    bool   // Whether an empty "{}" input_json_delta is deferred awaiting tool_use completion
 }
 
 // toolUseIDCounter provides a process-wide unique counter for tool use identifiers.
 var toolUseIDCounter uint64
+
+func antigravityClaudeToolUseID(modelName string, functionCall gjson.Result, fallback string) string {
+	if sigcompat.SignatureProviderFromModelName(modelName) == sigcompat.SignatureProviderGemini {
+		if stableID := util.GeminiClaudeToolUseID(functionCall.Get("id").String(), functionCall.Get("name").String(), functionCall.Get("args").Raw); stableID != "" {
+			return stableID
+		}
+	}
+	return util.SanitizeClaudeToolID(fallback)
+}
 
 // ConvertAntigravityResponseToClaude performs sophisticated streaming response format conversion.
 // This function implements a complex state machine that translates backend client responses
@@ -109,9 +136,15 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 			ToolNameMap:      util.DisambiguatedToolNameMap(originalRequestRawJSON),
 		}
 	}
-	modelName := gjson.GetBytes(requestRawJSON, "model").String()
-
 	params := (*param).(*Params)
+	// Request metadata is resolved once per stream; callers pass the same
+	// request bytes for the stream's lifetime.
+	if !params.RequestMetadataResolved {
+		params.ModelName = gjson.GetBytes(requestRawJSON, "model").String()
+		params.WebSearchStreamMode = shouldTranslateWebSearchGrounding(originalRequestRawJSON, requestRawJSON)
+		params.RequestMetadataResolved = true
+	}
+	modelName := params.ModelName
 
 	if bytes.Equal(rawJSON, []byte("[DONE]")) {
 		output := make([]byte, 0, 256)
@@ -132,8 +165,8 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 	appendEvent := func(event, payload string) {
 		output = translatorcommon.AppendSSEEventString(output, event, payload, 3)
 	}
-	webSearchStreamMode := shouldTranslateWebSearchGrounding(originalRequestRawJSON, requestRawJSON)
-	appendThinkingSignature := func(signature string) {
+	webSearchStreamMode := params.WebSearchStreamMode
+	appendThinkingSignature := func(signature, direction, targetKind string) {
 		if signature == "" || params.ResponseType != 2 {
 			return
 		}
@@ -141,10 +174,62 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 			cache.CacheSignatureBestEffort(ctx, modelName, params.CurrentThinkingText.String(), signature)
 			params.CurrentThinkingText.Reset()
 		}
-		sigValue := formatClaudeSignatureValue(modelName, signature)
+		sigValue := formatGeminiClaudeCarrierValue(modelName, signature, direction, targetKind)
 		data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":""}}`, params.ResponseIndex)), "delta.signature", sigValue)
 		appendEvent("content_block_delta", string(data))
+		params.CurrentThinkingSigned = true
 		params.HasContent = true
+	}
+	flushPendingToolInput := func() {
+		if params.ResponseType == 3 && params.CurrentToolPendingEmpty && !params.CurrentToolInputEmitted {
+			data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":""}}`, params.ResponseIndex)), "delta.partial_json", "{}")
+			appendEvent("content_block_delta", string(data))
+			params.CurrentToolInputEmitted = true
+			params.CurrentToolPendingEmpty = false
+		}
+	}
+	closeCurrentBlock := func() {
+		if params.ResponseType == 0 {
+			return
+		}
+		flushPendingToolInput()
+		appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, params.ResponseIndex))
+		params.ResponseIndex++
+		params.ResponseType = 0
+		params.CurrentThinkingSigned = false
+	}
+	startEmptyThinkingBlock := func() {
+		appendEvent("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":""}}`, params.ResponseIndex))
+		params.ResponseType = 2
+		params.CurrentThinkingSigned = false
+		params.HasContent = true
+	}
+	appendCarrierSignature := func(signature, direction, targetKind string) {
+		if signature == "" || params.ResponseType != 2 {
+			return
+		}
+		sigValue := formatGeminiClaudeCarrierValue(modelName, signature, direction, targetKind)
+		data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":""}}`, params.ResponseIndex)), "delta.signature", sigValue)
+		appendEvent("content_block_delta", string(data))
+		params.CurrentThinkingSigned = true
+		params.HasContent = true
+	}
+	appendPartSignature := func(signature, direction, targetKind string) bool {
+		if signature == "" {
+			return false
+		}
+		if params.ResponseType == 2 && !params.CurrentThinkingSigned {
+			appendThinkingSignature(signature, direction, targetKind)
+			return false
+		}
+		if direction == geminiClaudeCarrierPrevious && targetKind == geminiClaudeCarrierText {
+			cache.CacheSignatureBestEffort(ctx, modelName, "", signature)
+			return false
+		}
+		closeCurrentBlock()
+		startEmptyThinkingBlock()
+		appendCarrierSignature(signature, direction, targetKind)
+		return true
 	}
 
 	// Initialize the streaming session with a message_start event
@@ -209,8 +294,14 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 			}
 			hasThoughtSignature := thoughtSignatureResult.Exists() && thoughtSignatureResult.String() != "" && !functionCallResult.Exists()
 
-			if hasThoughtSignature && !partTextResult.Exists() {
-				appendThinkingSignature(thoughtSignatureResult.String())
+			if hasThoughtSignature && (!partTextResult.Exists() || partTextResult.String() == "") {
+				direction := geminiClaudeCarrierNext
+				targetKind := geminiClaudeCarrierAny
+				if params.HasSemanticContent {
+					direction = geminiClaudeCarrierPrevious
+					targetKind = params.LastSemanticKind
+				}
+				appendPartSignature(thoughtSignatureResult.String(), direction, targetKind)
 				continue
 			}
 
@@ -219,6 +310,11 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 				partText := partTextResult.String()
 				if partResult.Get("thought").Bool() {
 					if partText != "" {
+						params.HasSemanticContent = true
+						params.LastSemanticKind = geminiClaudeCarrierText
+						if params.ResponseType == 2 && params.CurrentThinkingSigned {
+							closeCurrentBlock()
+						}
 						if params.ResponseType == 2 {
 							params.CurrentThinkingText.WriteString(partText)
 							data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":""}}`, params.ResponseIndex)), "delta.thinking", partText)
@@ -226,10 +322,12 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 							params.HasContent = true
 						} else {
 							if params.ResponseType != 0 {
+								flushPendingToolInput()
 								appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, params.ResponseIndex))
 								params.ResponseIndex++
 							}
 							appendEvent("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":""}}`, params.ResponseIndex))
+							params.CurrentThinkingSigned = false
 							data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":""}}`, params.ResponseIndex)), "delta.thinking", partText)
 							appendEvent("content_block_delta", string(data))
 							params.ResponseType = 2
@@ -239,42 +337,81 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 						}
 					}
 					if hasThoughtSignature {
-						appendThinkingSignature(thoughtSignatureResult.String())
+						appendThinkingSignature(thoughtSignatureResult.String(), geminiClaudeCarrierStandalone, geminiClaudeCarrierText)
 					}
 				} else {
+					signatureTargetsVisibleText := false
 					if hasThoughtSignature {
-						appendThinkingSignature(thoughtSignatureResult.String())
+						signatureTargetsVisibleText = appendPartSignature(thoughtSignatureResult.String(), geminiClaudeCarrierNext, geminiClaudeCarrierText)
 					}
-					finishReasonResult := gjson.GetBytes(rawJSON, "response.candidates.0.finishReason")
-					if partText != "" || !finishReasonResult.Exists() {
-						if params.ResponseType == 1 {
-							data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, params.ResponseIndex)), "delta.text", partText)
-							appendEvent("content_block_delta", string(data))
-							params.HasContent = true
-						} else {
-							if params.ResponseType != 0 {
-								appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, params.ResponseIndex))
-								params.ResponseIndex++
-							}
-							if partText != "" {
-								appendEvent("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`, params.ResponseIndex))
-								data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, params.ResponseIndex)), "delta.text", partText)
-								appendEvent("content_block_delta", string(data))
-								params.ResponseType = 1
-								params.HasContent = true
-							}
+					if params.ResponseType == 1 {
+						data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, params.ResponseIndex)), "delta.text", partText)
+						appendEvent("content_block_delta", string(data))
+						params.HasContent = true
+					} else if partText != "" {
+						if params.ResponseType != 0 {
+							flushPendingToolInput()
+							appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, params.ResponseIndex))
+							params.ResponseIndex++
+						}
+						appendEvent("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`, params.ResponseIndex))
+						data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, params.ResponseIndex)), "delta.text", partText)
+						appendEvent("content_block_delta", string(data))
+						params.ResponseType = 1
+						params.HasContent = true
+					}
+					if partText != "" {
+						params.HasSemanticContent = true
+						params.LastSemanticKind = geminiClaudeCarrierText
+						if signatureTargetsVisibleText {
+							closeCurrentBlock()
 						}
 					}
 				}
 			} else if functionCallResult.Exists() {
+				toolSignature := thoughtSignatureResult.String()
+				if cache.GetModelGroup(modelName) != "claude" {
+					appendPartSignature(toolSignature, geminiClaudeCarrierNext, geminiClaudeCarrierFunction)
+				}
 				// Handle function/tool calls from the AI model
 				// This processes tool usage requests and formats them for Claude Code API compatibility
 				params.HasToolUse = true
 				fcName := util.RestoreSanitizedToolName(params.ToolNameMap, functionCallResult.Get("name").String())
 
+				if params.ResponseType == 3 && fcName == "" && params.CurrentToolName != "" {
+					if fcArgsResult := functionCallResult.Get("args"); fcArgsResult.Exists() {
+						partialJSON := util.CleanClaudeToolArgumentsWithTranslated(fcArgsResult.Raw, params.CurrentToolName, originalRequestRawJSON, requestRawJSON)
+						if params.CurrentToolIsParameterless {
+							if params.CurrentToolInputEmitted {
+								partialJSON = ""
+							} else {
+								params.CurrentToolInputEmitted = true
+								params.CurrentToolPendingEmpty = false
+							}
+						} else if partialJSON == "{}" {
+							if !params.CurrentToolInputEmitted {
+								params.CurrentToolPendingEmpty = true
+							}
+							partialJSON = ""
+						} else if partialJSON != "" {
+							params.CurrentToolInputEmitted = true
+							params.CurrentToolPendingEmpty = false
+						}
+						if partialJSON != "" || !params.CurrentToolPendingEmpty {
+							data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":""}}`, params.ResponseIndex)), "delta.partial_json", partialJSON)
+							appendEvent("content_block_delta", string(data))
+						}
+					}
+					params.HasContent = true
+					params.HasSemanticContent = true
+					params.LastSemanticKind = geminiClaudeCarrierFunction
+					continue
+				}
+
 				// Handle state transitions when switching to function calls
 				// Close any existing function call block first
 				if params.ResponseType == 3 {
+					flushPendingToolInput()
 					appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, params.ResponseIndex))
 					params.ResponseIndex++
 					params.ResponseType = 0
@@ -289,24 +426,50 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 
 				// Close any other existing content block
 				if params.ResponseType != 0 {
+					flushPendingToolInput()
 					appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, params.ResponseIndex))
 					params.ResponseIndex++
 				}
 
+				params.CurrentToolName = fcName
+				params.CurrentToolIsParameterless = util.ClaudeToolIsParameterless(fcName, originalRequestRawJSON)
+				params.CurrentToolInputEmitted = false
+				params.CurrentToolPendingEmpty = false
 				// Start a new tool use content block
 				// This creates the structure for a function call in Claude Code format
 				// Create the tool use block with unique ID and function details
 				data := []byte(fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":"","name":"","input":{}}}`, params.ResponseIndex))
-				data, _ = sjson.SetBytes(data, "content_block.id", util.SanitizeClaudeToolID(fmt.Sprintf("%s-%d-%d", fcName, time.Now().UnixNano(), atomic.AddUint64(&toolUseIDCounter, 1))))
+				fallbackID := fmt.Sprintf("%s-%d-%d", fcName, time.Now().UnixNano(), atomic.AddUint64(&toolUseIDCounter, 1))
+				data, _ = sjson.SetBytes(data, "content_block.id", antigravityClaudeToolUseID(modelName, functionCallResult, fallbackID))
 				data, _ = sjson.SetBytes(data, "content_block.name", fcName)
+				if cache.GetModelGroup(modelName) == "claude" && toolSignature != "" {
+					data, _ = sjson.SetBytes(data, "content_block.signature", formatClaudeSignatureValue(modelName, toolSignature))
+				}
 				appendEvent("content_block_start", string(data))
 
 				if fcArgsResult := functionCallResult.Get("args"); fcArgsResult.Exists() {
-					data, _ = sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":""}}`, params.ResponseIndex)), "delta.partial_json", fcArgsResult.Raw)
-					appendEvent("content_block_delta", string(data))
+					cleanArgs := util.CleanClaudeToolArgumentsWithTranslated(fcArgsResult.Raw, fcName, originalRequestRawJSON, requestRawJSON)
+					if params.CurrentToolIsParameterless {
+						if params.CurrentToolInputEmitted {
+							cleanArgs = ""
+						} else {
+							params.CurrentToolInputEmitted = true
+						}
+					} else if cleanArgs == "{}" {
+						params.CurrentToolPendingEmpty = true
+						cleanArgs = ""
+					} else if cleanArgs != "" {
+						params.CurrentToolInputEmitted = true
+					}
+					if cleanArgs != "" || !params.CurrentToolPendingEmpty {
+						data, _ = sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":""}}`, params.ResponseIndex)), "delta.partial_json", cleanArgs)
+						appendEvent("content_block_delta", string(data))
+					}
 				}
 				params.ResponseType = 3
 				params.HasContent = true
+				params.HasSemanticContent = true
+				params.LastSemanticKind = geminiClaudeCarrierFunction
 			}
 		}
 	}
@@ -314,17 +477,26 @@ func ConvertAntigravityResponseToClaude(ctx context.Context, _ string, originalR
 	if finishReasonResult := gjson.GetBytes(rawJSON, "response.candidates.0.finishReason"); finishReasonResult.Exists() {
 		params.HasFinishReason = true
 		params.FinishReason = finishReasonResult.String()
+		if params.FinishReason != "" {
+			flushPendingToolInput()
+		}
 	}
 
 	if usageResult := gjson.GetBytes(rawJSON, "response.usageMetadata"); usageResult.Exists() {
 		params.HasUsageMetadata = true
+		rawPromptTokenCount := usageResult.Get("promptTokenCount").Int()
 		params.CachedTokenCount = usageResult.Get("cachedContentTokenCount").Int()
-		params.PromptTokenCount = usageResult.Get("promptTokenCount").Int() - params.CachedTokenCount
+		params.PromptTokenCount = rawPromptTokenCount - params.CachedTokenCount
+		if params.PromptTokenCount < 0 {
+			params.PromptTokenCount = 0
+		}
 		params.CandidatesTokenCount = usageResult.Get("candidatesTokenCount").Int()
 		params.ThoughtsTokenCount = usageResult.Get("thoughtsTokenCount").Int()
 		params.TotalTokenCount = usageResult.Get("totalTokenCount").Int()
 		if params.CandidatesTokenCount == 0 && params.TotalTokenCount > 0 {
-			params.CandidatesTokenCount = params.TotalTokenCount - params.PromptTokenCount - params.ThoughtsTokenCount
+			// totalTokenCount includes the cached part of promptTokenCount, so the
+			// fallback must use the raw prompt count, not the cache-reduced one.
+			params.CandidatesTokenCount = params.TotalTokenCount - rawPromptTokenCount - params.ThoughtsTokenCount
 			if params.CandidatesTokenCount < 0 {
 				params.CandidatesTokenCount = 0
 			}
@@ -380,6 +552,12 @@ func appendFinalEvents(params *Params, output *[]byte, force bool) {
 		return
 	}
 
+	if params.ResponseType == 3 && params.CurrentToolPendingEmpty && !params.CurrentToolInputEmitted {
+		data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":""}}`, params.ResponseIndex)), "delta.partial_json", "{}")
+		*output = translatorcommon.AppendSSEEventString(*output, "content_block_delta", string(data), 3)
+		params.CurrentToolInputEmitted = true
+		params.CurrentToolPendingEmpty = false
+	}
 	if params.ResponseType != 0 {
 		*output = translatorcommon.AppendSSEEventString(*output, "content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, params.ResponseIndex), 3)
 		params.ResponseType = 0
@@ -388,7 +566,9 @@ func appendFinalEvents(params *Params, output *[]byte, force bool) {
 	stopReason := resolveStopReason(params)
 	usageOutputTokens := params.CandidatesTokenCount + params.ThoughtsTokenCount
 	if usageOutputTokens == 0 && params.TotalTokenCount > 0 {
-		usageOutputTokens = params.TotalTokenCount - params.PromptTokenCount
+		// PromptTokenCount excludes cached tokens for input_tokens, while
+		// TotalTokenCount includes them; add the cache back for the fallback.
+		usageOutputTokens = params.TotalTokenCount - (params.PromptTokenCount + params.CachedTokenCount)
 		if usageOutputTokens < 0 {
 			usageOutputTokens = 0
 		}
@@ -478,30 +658,26 @@ func ConvertAntigravityResponseToClaudeNonStream(_ context.Context, _ string, or
 		}
 	}
 
-	contentArrayInitialized := false
-	ensureContentArray := func() {
-		if contentArrayInitialized {
-			return
-		}
-		responseJSON, _ = sjson.SetRawBytes(responseJSON, "content", []byte("[]"))
-		contentArrayInitialized = true
-	}
+	var blocks [][]byte
 
 	parts := root.Get("response.candidates.0.content.parts")
 	textBuilder := strings.Builder{}
 	thinkingBuilder := strings.Builder{}
 	thinkingSignature := ""
+	thinkingSignatureDirection := geminiClaudeCarrierStandalone
+	thinkingSignatureTargetKind := geminiClaudeCarrierText
 	toolIDCounter := 0
 	hasToolCall := false
+	hasSemanticContent := false
+	lastSemanticKind := geminiClaudeCarrierAny
 
 	flushText := func() {
 		if textBuilder.Len() == 0 {
 			return
 		}
-		ensureContentArray()
 		block := []byte(`{"type":"text","text":""}`)
 		block, _ = sjson.SetBytes(block, "text", textBuilder.String())
-		responseJSON, _ = sjson.SetRawBytes(responseJSON, "content.-1", block)
+		blocks = append(blocks, block)
 		textBuilder.Reset()
 	}
 
@@ -509,16 +685,26 @@ func ConvertAntigravityResponseToClaudeNonStream(_ context.Context, _ string, or
 		if thinkingBuilder.Len() == 0 && thinkingSignature == "" {
 			return
 		}
-		ensureContentArray()
 		block := []byte(`{"type":"thinking","thinking":""}`)
 		block, _ = sjson.SetBytes(block, "thinking", thinkingBuilder.String())
 		if thinkingSignature != "" {
-			sigValue := formatClaudeSignatureValue(modelName, thinkingSignature)
+			sigValue := formatGeminiClaudeCarrierValue(modelName, thinkingSignature, thinkingSignatureDirection, thinkingSignatureTargetKind)
 			block, _ = sjson.SetBytes(block, "signature", sigValue)
 		}
-		responseJSON, _ = sjson.SetRawBytes(responseJSON, "content.-1", block)
+		blocks = append(blocks, block)
 		thinkingBuilder.Reset()
 		thinkingSignature = ""
+		thinkingSignatureDirection = geminiClaudeCarrierStandalone
+		thinkingSignatureTargetKind = geminiClaudeCarrierText
+	}
+
+	appendSignatureCarrier := func(signature, direction, targetKind string) {
+		if signature == "" {
+			return
+		}
+		carrier := []byte(`{"type":"thinking","thinking":"","signature":""}`)
+		carrier, _ = sjson.SetBytes(carrier, "signature", formatGeminiClaudeCarrierValue(modelName, signature, direction, targetKind))
+		blocks = append(blocks, carrier)
 	}
 
 	if parts.IsArray() {
@@ -527,47 +713,116 @@ func ConvertAntigravityResponseToClaudeNonStream(_ context.Context, _ string, or
 			if !sig.Exists() {
 				sig = part.Get("thought_signature")
 			}
-			hasThoughtSignature := sig.Exists() && sig.String() != "" && !part.Get("functionCall").Exists()
-			isThought := part.Get("thought").Bool()
-			if hasThoughtSignature && (isThought || thinkingBuilder.Len() > 0) {
-				thinkingSignature = sig.String()
-			}
-
-			if text := part.Get("text"); text.Exists() && text.String() != "" {
-				if isThought {
-					flushText()
-					thinkingBuilder.WriteString(text.String())
-					continue
-				}
-				flushThinking()
-				textBuilder.WriteString(text.String())
-				continue
+			signature := ""
+			if sig.Exists() {
+				signature = sig.String()
 			}
 
 			if functionCall := part.Get("functionCall"); functionCall.Exists() {
+				signatureAttachedToThought := false
+				isClaudeTarget := cache.GetModelGroup(modelName) == "claude"
+				if !isClaudeTarget && signature != "" && thinkingBuilder.Len() > 0 && thinkingSignature == "" {
+					thinkingSignature = signature
+					thinkingSignatureDirection = geminiClaudeCarrierNext
+					thinkingSignatureTargetKind = geminiClaudeCarrierFunction
+					signatureAttachedToThought = true
+				}
 				flushThinking()
 				flushText()
 				hasToolCall = true
 
 				name := util.RestoreSanitizedToolName(toolNameMap, functionCall.Get("name").String())
 				toolIDCounter++
+				if !isClaudeTarget && signature != "" && !signatureAttachedToThought {
+					appendSignatureCarrier(signature, geminiClaudeCarrierNext, geminiClaudeCarrierFunction)
+				}
 				toolBlock := []byte(`{"type":"tool_use","id":"","name":"","input":{}}`)
-				toolBlock, _ = sjson.SetBytes(toolBlock, "id", fmt.Sprintf("tool_%d", toolIDCounter))
+				toolBlock, _ = sjson.SetBytes(toolBlock, "id", antigravityClaudeToolUseID(modelName, functionCall, fmt.Sprintf("tool_%d", toolIDCounter)))
 				toolBlock, _ = sjson.SetBytes(toolBlock, "name", name)
-
-				if args := functionCall.Get("args"); args.Exists() && args.Raw != "" && gjson.Valid(args.Raw) && args.IsObject() {
-					toolBlock, _ = sjson.SetRawBytes(toolBlock, "input", []byte(args.Raw))
+				if isClaudeTarget && signature != "" {
+					toolBlock, _ = sjson.SetBytes(toolBlock, "signature", formatClaudeSignatureValue(modelName, signature))
 				}
 
-				ensureContentArray()
-				responseJSON, _ = sjson.SetRawBytes(responseJSON, "content.-1", toolBlock)
+				if args := functionCall.Get("args"); args.Exists() && args.Raw != "" && gjson.Valid(args.Raw) && args.IsObject() {
+					cleanArgs := util.CleanClaudeToolArgumentsWithTranslated(args.Raw, name, originalRequestRawJSON, requestRawJSON)
+					toolBlock, _ = sjson.SetRawBytes(toolBlock, "input", []byte(cleanArgs))
+				}
+
+				blocks = append(blocks, toolBlock)
+				hasSemanticContent = true
+				lastSemanticKind = geminiClaudeCarrierFunction
 				continue
+			}
+
+			text := part.Get("text")
+			isThought := part.Get("thought").Bool()
+			if isThought {
+				flushText()
+				if thinkingSignature != "" {
+					flushThinking()
+				}
+				if text.Exists() && text.String() != "" {
+					thinkingBuilder.WriteString(text.String())
+					hasSemanticContent = true
+					lastSemanticKind = geminiClaudeCarrierText
+				}
+				if signature != "" {
+					if thinkingBuilder.Len() > 0 {
+						thinkingSignature = signature
+						thinkingSignatureDirection = geminiClaudeCarrierStandalone
+						thinkingSignatureTargetKind = geminiClaudeCarrierText
+						flushThinking()
+					} else if hasSemanticContent && lastSemanticKind == geminiClaudeCarrierText {
+						cache.CacheSignatureBestEffort(context.Background(), modelName, "", signature)
+					} else if hasSemanticContent {
+						appendSignatureCarrier(signature, geminiClaudeCarrierPrevious, lastSemanticKind)
+					} else {
+						appendSignatureCarrier(signature, geminiClaudeCarrierNext, geminiClaudeCarrierAny)
+					}
+				}
+				continue
+			}
+
+			visibleSignatureCarrier := false
+			if signature != "" {
+				if thinkingBuilder.Len() > 0 && thinkingSignature == "" {
+					thinkingSignature = signature
+					thinkingSignatureDirection = geminiClaudeCarrierNext
+					thinkingSignatureTargetKind = geminiClaudeCarrierText
+					flushThinking()
+				} else {
+					flushThinking()
+					flushText()
+					if text.Exists() && text.String() != "" {
+						appendSignatureCarrier(signature, geminiClaudeCarrierNext, geminiClaudeCarrierText)
+						visibleSignatureCarrier = true
+					} else if hasSemanticContent && lastSemanticKind == geminiClaudeCarrierText {
+						cache.CacheSignatureBestEffort(context.Background(), modelName, "", signature)
+					} else if hasSemanticContent {
+						appendSignatureCarrier(signature, geminiClaudeCarrierPrevious, lastSemanticKind)
+					} else {
+						appendSignatureCarrier(signature, geminiClaudeCarrierNext, geminiClaudeCarrierAny)
+					}
+				}
+			}
+			if text.Exists() && text.String() != "" {
+				flushThinking()
+				textBuilder.WriteString(text.String())
+				hasSemanticContent = true
+				lastSemanticKind = geminiClaudeCarrierText
+				if visibleSignatureCarrier {
+					flushText()
+				}
 			}
 		}
 	}
 
 	flushThinking()
 	flushText()
+
+	if len(blocks) > 0 {
+		responseJSON, _ = sjson.SetRawBytes(responseJSON, "content", translatorcommon.JoinRawArray(blocks))
+	}
 
 	stopReason := "end_turn"
 	if hasToolCall {

@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
 type delayedClaudeBootstrapErrorExecutor struct {
@@ -79,7 +79,7 @@ func TestClaudeStreamingBootstrapHeartbeatPrecedesDelayedStartupError(t *testing
 	})
 
 	baseHandler := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{
-		Streaming: sdkconfig.StreamingConfig{KeepAliveSeconds: 1},
+		Streaming: sdkconfig.StreamingConfig{KeepAliveSeconds: 1, SendKeepAliveBeforeFT: true},
 	}, manager)
 	handler := NewClaudeCodeAPIHandler(baseHandler)
 	recorder := httptest.NewRecorder()

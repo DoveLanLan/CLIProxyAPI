@@ -5,9 +5,9 @@
 package xai
 
 import (
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/codex"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking/provider/codex"
 )
 
 // Applier implements thinking.ProviderApplier for xAI models.
@@ -33,6 +33,8 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 	return a.Applier.Apply(body, config, modelInfo)
 }
 
+// normalizeXAIEffort maps canonical thinking levels that xAI does not accept onto
+// the closest effort it does accept.
 func normalizeXAIEffort(level thinking.ThinkingLevel) thinking.ThinkingLevel {
 	switch level {
 	case thinking.LevelMinimal:

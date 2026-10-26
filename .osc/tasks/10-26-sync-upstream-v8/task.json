@@ -1,0 +1,17 @@
+{
+  "name": "Sync upstream v8.0.43 preserving deploy, CPA-Manager and local providers",
+  "type": "refactor",
+  "branch": "task/sync-upstream-v8",
+  "priority": "P1",
+  "description": "",
+  "depends_on": [
+    "07-01-sync-upstream-v7.2.48"
+  ],
+  "status": "done",
+  "current_phase": 1,
+  "next_action": [],
+  "requires_change_workflow": true,
+  "change_workflow_status": "closed",
+  "started_at": "2026-10-26T00:00:00Z",
+  "completed_at": "2026-10-26T10:30:00Z"
+}

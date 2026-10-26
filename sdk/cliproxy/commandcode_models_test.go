@@ -10,19 +10,23 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	"github.com/tidwall/gjson"
 )
 
 func TestCommandCodeRegistrationAndLocalModels(t *testing.T) {
 	cfg := &config.Config{CommandCodeKey: []config.GeminiKey{{APIKey: "user_one", Models: []config.GeminiModel{{Name: "upstream", Alias: "friendly"}}}}}
 	s := &Service{cfg: cfg, coreManager: coreauth.NewManager(nil, nil, nil)}
-	auth := &coreauth.Auth{ID: "cc-registration-test", Provider: "commandcode", Attributes: map[string]string{"api_key": "user_one"}}
+	auth := &coreauth.Auth{ID: "cc-registration-test", Provider: "commandcode", Status: coreauth.StatusActive, Attributes: map[string]string{"api_key": "user_one"}}
+	t.Cleanup(func() { s.coreManager.Remove(context.Background(), auth.ID) })
+	if _, errRegister := s.coreManager.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
 	s.ensureExecutorsForAuth(auth)
 	first, _ := s.coreManager.Executor("commandcode")
 	if _, ok := first.(*executor.CommandCodeExecutor); !ok {

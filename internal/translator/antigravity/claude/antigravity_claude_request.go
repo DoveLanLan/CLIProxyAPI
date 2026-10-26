@@ -9,12 +9,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/cache"
-	sigcompat "github.com/router-for-me/CLIProxyAPI/v7/internal/signature"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
-	translatorcommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/common"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/common"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/cache"
+	sigcompat "github.com/router-for-me/CLIProxyAPI/v8/internal/signature"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
+	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/translator/gemini/common"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -31,7 +31,15 @@ func resolveThinkingSignature(modelName, thinkingText, rawSignature string) stri
 func resolveThinkingSignatureRequired(ctx context.Context, modelName, thinkingText, rawSignature string) (string, error) {
 	targetProvider := sigcompat.SignatureProviderFromModelName(modelName)
 	if targetProvider == sigcompat.SignatureProviderGemini {
-		return resolveProviderCompatibleSignature(targetProvider, rawSignature, sigcompat.SignatureBlockKindGeminiModelPart), nil
+		innerSignature, _, targetKind, marked, okCarrier := decodeGeminiClaudeCarrierSignature(rawSignature)
+		if !okCarrier {
+			return "", nil
+		}
+		blockKind := sigcompat.SignatureBlockKindGeminiModelPart
+		if marked && targetKind == geminiClaudeCarrierFunction {
+			blockKind = sigcompat.SignatureBlockKindGeminiFunctionCall
+		}
+		return resolveProviderCompatibleSignature(targetProvider, innerSignature, blockKind), nil
 	}
 	if cache.SignatureCacheEnabled() {
 		return resolveCacheModeSignatureRequired(ctx, modelName, thinkingText, rawSignature)
@@ -52,6 +60,18 @@ func resolveCacheModeSignature(modelName, thinkingText, rawSignature string) str
 
 func resolveCacheModeSignatureRequired(ctx context.Context, modelName, thinkingText, rawSignature string) (string, error) {
 	targetProvider := sigcompat.SignatureProviderFromModelName(modelName)
+
+	// 1. Check client-carried provider-native (or legacy prefixed) signature first.
+	// If the client provided a signature that is incompatible or invalid, do not
+	// fall back to recovery cache.
+	if rawSignature != "" {
+		if signature := resolveProviderCompatibleSignature(targetProvider, rawSignature, sigcompat.SignatureBlockKindUnknown); signature != "" {
+			return signature, nil
+		}
+		return "", nil
+	}
+
+	// 2. Recovery cache only when client omitted signature (rawSignature == "").
 	if thinkingText != "" {
 		cachedSig, errCachedSig := cache.GetCachedSignatureRequired(ctx, modelName, thinkingText)
 		if errCachedSig != nil {
@@ -67,28 +87,6 @@ func resolveCacheModeSignatureRequired(ctx context.Context, modelName, thinkingT
 			}
 			return cachedSig, nil
 		}
-	}
-
-	if rawSignature == "" {
-		return "", nil
-	}
-
-	clientSignature := ""
-	arrayClientSignatures := strings.SplitN(rawSignature, "#", 2)
-	if len(arrayClientSignatures) == 2 {
-		if cache.GetModelGroup(modelName) == arrayClientSignatures[0] {
-			clientSignature = arrayClientSignatures[1]
-		}
-	}
-	if cache.HasValidSignature(modelName, clientSignature) {
-		if targetProvider == sigcompat.SignatureProviderClaude {
-			signature, ok := sigcompat.CompatibleAntigravityClaudeThinkingSignature(clientSignature)
-			if !ok {
-				return "", nil
-			}
-			return signature, nil
-		}
-		return clientSignature, nil
 	}
 
 	return "", nil
@@ -307,12 +305,20 @@ func logDroppedAntigravityToolUseSignature(modelName string, messageIndex, conte
 //
 // Returns:
 //   - []byte: The transformed request data in Antigravity API format
-func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ bool) []byte {
+func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, stream bool) ([]byte, error) {
+	return convertClaudeRequestToAntigravity(modelName, inputRawJSON, stream)
+
+}
+
+// convertClaudeRequestToAntigravity also reports an attachment Antigravity
+// cannot receive when it leaves a user turn with nothing to send.
+func convertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ bool) ([]byte, error) {
 	enableThoughtTranslate := true
 	rawJSON := inputRawJSON
 	if shouldBuildAntigravityWebSearchRequest(modelName, rawJSON) {
-		return buildAntigravityWebSearchRequest(modelName, rawJSON)
+		return buildAntigravityWebSearchRequest(modelName, rawJSON), nil
 	}
+	var drops translatorcommon.UserTurnDrops
 	functionNameMap := util.SanitizedFunctionNameMap(rawJSON)
 
 	// system instruction
@@ -347,6 +353,7 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 	// tool_use_id → tool_name lookup, populated incrementally during the main loop.
 	// Claude's tool_result references tool_use by ID; Gemini requires functionResponse.name.
 	toolNameByID := make(map[string]string)
+	var pendingToolUseIDs []string
 
 	messagesResult := gjson.GetBytes(rawJSON, "messages")
 	if messagesResult.IsArray() {
@@ -359,15 +366,38 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 				continue
 			}
 			originalRole := roleResult.String()
+			var precedingToolUseIDs []string
+			if originalRole != "system" && originalRole != "developer" {
+				precedingToolUseIDs = pendingToolUseIDs
+				pendingToolUseIDs = nil
+			}
 			role := originalRole
 			if role == "assistant" {
 				role = "model"
-			} else if role == "system" {
+			} else if role == "system" || role == "developer" {
 				role = "user"
 			}
 			partItems := make([][]byte, 0, 4)
+			appendDetachedCarrier := func(signature string, _ bool) {
+				carrier := []byte(`{"text":"","thoughtSignature":""}`)
+				carrier, _ = sjson.SetBytes(carrier, "thoughtSignature", signature)
+				partItems = append(partItems, carrier)
+			}
+			pendingDetachedSignature := ""
+			pendingDetachedTargetKind := ""
+			clearPendingDetachedSignature := func() {
+				pendingDetachedSignature = ""
+				pendingDetachedTargetKind = ""
+			}
+			setPendingDetachedSignature := func(signature, targetKind string) {
+				if pendingDetachedSignature != "" {
+					appendDetachedCarrier(pendingDetachedSignature, true)
+				}
+				pendingDetachedSignature = signature
+				pendingDetachedTargetKind = targetKind
+			}
 			contentsResult := messageResult.Get("content")
-			if originalRole == "system" {
+			if originalRole == "system" || originalRole == "developer" {
 				if reminderText, ok := translatorcommon.ClaudeMessageSystemReminderText(contentsResult); ok {
 					partJSON := []byte(`{}`)
 					partJSON, _ = sjson.SetBytes(partJSON, "text", reminderText)
@@ -377,46 +407,150 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 				continue
 			}
 			if contentsResult.IsArray() {
+				if originalRole == "user" {
+					contentsResult = translatorcommon.AlignClaudeToolResults(contentsResult, precedingToolUseIDs)
+				}
 				contentResults := contentsResult.Array()
 				numContents := len(contentResults)
 				for j := 0; j < numContents; j++ {
 					contentResult := contentResults[j]
 					contentTypeResult := contentResult.Get("type")
 					if contentTypeResult.Type == gjson.String && contentTypeResult.String() == "thinking" {
+						if originalRole != "assistant" {
+							continue
+						}
 						// Use GetThinkingText to handle wrapped thinking objects
 						thinkingText := thinking.GetThinkingText(contentResult)
 						signatureResult := contentResult.Get("signature")
 						signature := resolveThinkingSignature(modelName, thinkingText, signatureResult.String())
+						if signature != "" && pendingDetachedSignature != "" {
+							if pendingDetachedSignature != signature {
+								appendDetachedCarrier(pendingDetachedSignature, false)
+							}
+							clearPendingDetachedSignature()
+						}
+						signatureFromPendingCarrier := false
+						if signature == "" && thinkingText != "" && pendingDetachedSignature != "" {
+							if pendingDetachedTargetKind == "" || pendingDetachedTargetKind == geminiClaudeCarrierAny || pendingDetachedTargetKind == geminiClaudeCarrierText {
+								signature = pendingDetachedSignature
+								signatureFromPendingCarrier = true
+							} else {
+								appendDetachedCarrier(pendingDetachedSignature, true)
+							}
+							clearPendingDetachedSignature()
+						}
 
-						// Skip unsigned thinking blocks instead of converting them to text.
+						isGeminiSignature := sigcompat.SignatureProviderFromModelName(modelName) == sigcompat.SignatureProviderGemini
+
+						// Skip unsigned thinking blocks instead of converting them to text for non-Gemini providers.
 						isUnsigned := !hasResolvedThinkingSignature(modelName, signature)
 
 						// If unsigned, skip entirely (don't convert to text)
 						// Claude requires assistant messages to start with thinking blocks when thinking is enabled
 						// Converting to text would break this requirement
-						if isUnsigned {
+						if isUnsigned && !isGeminiSignature {
 							logDroppedAntigravityThinkingSignature(modelName, i, j, thinkingText, signatureResult)
 							enableThoughtTranslate = false
 							continue
 						}
 
-						// Drop empty-text thinking blocks (redacted thinking from Claude Max).
-						// Antigravity wraps empty text into a prompt-caching-scope object that
-						// omits the required inner "thinking" field, causing:
-						//   400 "messages.N.content.0.thinking.thinking: Field required"
-						if thinkingText == "" {
-							logDroppedAntigravityEmptyThinking(modelName, i, j)
+						nextAcceptsDetachedSignature := false
+						nextTargetKind := geminiClaudeCarrierAny
+						if j+1 < numContents {
+							switch contentResults[j+1].Get("type").String() {
+							case "text":
+								nextAcceptsDetachedSignature = true
+								nextTargetKind = geminiClaudeCarrierText
+							case "tool_use":
+								nextAcceptsDetachedSignature = true
+								nextTargetKind = geminiClaudeCarrierFunction
+							}
+						}
+						_, carrierDirection, carrierTargetKind, markedCarrier, validCarrier := decodeGeminiClaudeCarrierSignature(signatureResult.String())
+
+						// Gemini places the signature on the visible text/function part that
+						// follows hidden thought text. Keep the thought text, but defer its
+						// opaque signature to that native neighboring part.
+						if thinkingText != "" {
+							partJSON := []byte(`{}`)
+							partJSON, _ = sjson.SetBytes(partJSON, "thought", true)
+							partJSON, _ = sjson.SetBytes(partJSON, "text", thinkingText)
+							if signatureFromPendingCarrier {
+								partJSON, _ = sjson.SetBytes(partJSON, "thoughtSignature", signature)
+							} else if markedCarrier {
+								carrierTargetsNext := carrierTargetKind == geminiClaudeCarrierAny || carrierTargetKind == nextTargetKind
+								if validCarrier && carrierDirection == geminiClaudeCarrierStandalone && (carrierTargetKind == geminiClaudeCarrierText || carrierTargetKind == geminiClaudeCarrierAny) {
+									partJSON, _ = sjson.SetBytes(partJSON, "thoughtSignature", signature)
+								} else if validCarrier && carrierDirection == geminiClaudeCarrierNext && nextAcceptsDetachedSignature && carrierTargetsNext {
+									setPendingDetachedSignature(signature, carrierTargetKind)
+								}
+							} else if isGeminiSignature && nextAcceptsDetachedSignature {
+								setPendingDetachedSignature(signature, nextTargetKind)
+							} else if signature != "" {
+								partJSON, _ = sjson.SetBytes(partJSON, "thoughtSignature", signature)
+							}
+							partItems = append(partItems, partJSON)
 							continue
 						}
 
-						// Valid signature with content, send as thought block.
-						partJSON := []byte(`{}`)
-						partJSON, _ = sjson.SetBytes(partJSON, "thought", true)
-						partJSON, _ = sjson.SetBytes(partJSON, "text", thinkingText)
-						if signature != "" {
-							partJSON, _ = sjson.SetBytes(partJSON, "thoughtSignature", signature)
+						if !isGeminiSignature {
+							logDroppedAntigravityEmptyThinking(modelName, i, j)
+							continue
 						}
-						partItems = append(partItems, partJSON)
+						if markedCarrier && !validCarrier {
+							continue
+						}
+						if markedCarrier && carrierDirection == geminiClaudeCarrierNext {
+							if geminiClaudeCarrierMatchesAdjacent(contentResults, j, carrierDirection, carrierTargetKind) {
+								setPendingDetachedSignature(signature, carrierTargetKind)
+							}
+							continue
+						}
+						if markedCarrier && carrierDirection == geminiClaudeCarrierStandalone {
+							appendDetachedCarrier(signature, false)
+							continue
+						}
+
+						// Tagged trailing carriers bind backward even when another semantic
+						// block follows. Untagged legacy carriers retain adjacency behavior.
+						bindBackward := markedCarrier && carrierDirection == geminiClaudeCarrierPrevious
+						if bindBackward && !geminiClaudeCarrierMatchesAdjacent(contentResults, j, carrierDirection, carrierTargetKind) {
+							continue
+						}
+						if !bindBackward && nextAcceptsDetachedSignature {
+							setPendingDetachedSignature(signature, nextTargetKind)
+							continue
+						}
+						attached := false
+						foundSemanticPart := false
+						for partIndex := len(partItems) - 1; partIndex >= 0; partIndex-- {
+							part := gjson.ParseBytes(partItems[partIndex])
+							partTargetKind := ""
+							switch {
+							case part.Get("functionCall").Exists():
+								partTargetKind = geminiClaudeCarrierFunction
+							case part.Get("text").Exists() && part.Get("text").String() != "":
+								partTargetKind = geminiClaudeCarrierText
+							default:
+								continue
+							}
+							foundSemanticPart = true
+							if markedCarrier && carrierTargetKind != geminiClaudeCarrierAny && carrierTargetKind != partTargetKind {
+								break
+							}
+							partSignature := strings.TrimSpace(part.Get("thoughtSignature").String())
+							replaceFallback := bindBackward && partTargetKind == geminiClaudeCarrierFunction && partSignature == sigcompat.GeminiSkipThoughtSignatureValidator
+							if partSignature == "" || replaceFallback {
+								partItems[partIndex], _ = sjson.SetBytes(partItems[partIndex], "thoughtSignature", signature)
+								attached = true
+							}
+							break
+						}
+						if !attached && (foundSemanticPart || bindBackward) {
+							appendDetachedCarrier(signature, false)
+						} else if !attached {
+							setPendingDetachedSignature(signature, carrierTargetKind)
+						}
 					} else if contentTypeResult.Type == gjson.String && contentTypeResult.String() == "text" {
 						prompt := contentResult.Get("text").String()
 						// Skip empty text parts to avoid Gemini API error:
@@ -426,6 +560,14 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 						}
 						partJSON := []byte(`{}`)
 						partJSON, _ = sjson.SetBytes(partJSON, "text", prompt)
+						if pendingDetachedSignature != "" {
+							if pendingDetachedTargetKind == "" || pendingDetachedTargetKind == geminiClaudeCarrierAny || pendingDetachedTargetKind == geminiClaudeCarrierText {
+								partJSON, _ = sjson.SetBytes(partJSON, "thoughtSignature", pendingDetachedSignature)
+							} else {
+								appendDetachedCarrier(pendingDetachedSignature, true)
+							}
+							clearPendingDetachedSignature()
+						}
 						partItems = append(partItems, partJSON)
 					} else if contentTypeResult.Type == gjson.String && contentTypeResult.String() == "tool_use" {
 						// NOTE: Do NOT inject dummy thinking blocks here.
@@ -440,15 +582,24 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 							toolNameByID[functionID] = originalFunctionName
 						}
 
-						// Handle both object and string input formats
+						// Preserve every present input as valid JSON for the function call.
 						var argsRaw string
 						if argsResult.IsObject() {
 							argsRaw = argsResult.Raw
-						} else if argsResult.Type == gjson.String {
-							// Input is a JSON string, parse and validate it
-							parsed := gjson.Parse(argsResult.String())
-							if parsed.IsObject() {
-								argsRaw = parsed.Raw
+						} else if argsResult.Exists() {
+							switch argsResult.Type {
+							case gjson.String:
+								// Parse JSON-encoded object strings while preserving other strings as JSON strings.
+								parsed := gjson.Parse(argsResult.String())
+								if parsed.IsObject() {
+									argsRaw = parsed.Raw
+								} else {
+									argsRaw = argsResult.Raw
+								}
+							case gjson.Null:
+								argsRaw = `{}`
+							default:
+								argsRaw = argsResult.Raw
 							}
 						}
 
@@ -456,6 +607,15 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 							partJSON := []byte(`{}`)
 
 							signature := resolveToolUseThoughtSignature(modelName, contentResult, true)
+							if pendingDetachedSignature != "" {
+								pendingMatchesTool := pendingDetachedTargetKind == "" || pendingDetachedTargetKind == geminiClaudeCarrierAny || pendingDetachedTargetKind == geminiClaudeCarrierFunction
+								if pendingMatchesTool && (signature == "" || signature == sigcompat.GeminiSkipThoughtSignatureValidator) {
+									signature = pendingDetachedSignature
+								} else {
+									appendDetachedCarrier(pendingDetachedSignature, true)
+								}
+								clearPendingDetachedSignature()
+							}
 							if signature != "" {
 								partJSON, _ = sjson.SetBytes(partJSON, "thoughtSignature", signature)
 							} else {
@@ -468,6 +628,9 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 							partJSON, _ = sjson.SetBytes(partJSON, "functionCall.name", functionName)
 							partJSON, _ = sjson.SetRawBytes(partJSON, "functionCall.args", []byte(argsRaw))
 							partItems = append(partItems, partJSON)
+							if originalRole == "assistant" {
+								pendingToolUseIDs = append(pendingToolUseIDs, functionID)
+							}
 						}
 					} else if contentTypeResult.Type == gjson.String && contentTypeResult.String() == "tool_result" {
 						toolCallID := contentResult.Get("tool_use_id").String()
@@ -520,9 +683,9 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 								}
 
 								if len(nonImageItems) == 1 {
-									functionResponseJSON, _ = sjson.SetRawBytes(functionResponseJSON, "response.result", nonImageItems[0])
+									functionResponseJSON = translatorcommon.SetGeminiFunctionResponseRaw(functionResponseJSON, "response.result", string(nonImageItems[0]))
 								} else if len(nonImageItems) > 1 {
-									functionResponseJSON, _ = sjson.SetRawBytes(functionResponseJSON, "response.result", translatorcommon.JoinRawArray(nonImageItems))
+									functionResponseJSON = translatorcommon.SetGeminiFunctionResponseRaw(functionResponseJSON, "response.result", string(translatorcommon.JoinRawArray(nonImageItems)))
 								} else {
 									functionResponseJSON, _ = sjson.SetBytes(functionResponseJSON, "response.result", "")
 								}
@@ -549,10 +712,10 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 									functionResponseJSON, _ = sjson.SetRawBytes(functionResponseJSON, "parts", translatorcommon.JoinRawArray([][]byte{imagePartJSON}))
 									functionResponseJSON, _ = sjson.SetBytes(functionResponseJSON, "response.result", "")
 								} else {
-									functionResponseJSON, _ = sjson.SetRawBytes(functionResponseJSON, "response.result", []byte(functionResponseResult.Raw))
+									functionResponseJSON = translatorcommon.SetGeminiFunctionResponseResult(functionResponseJSON, "response.result", functionResponseResult)
 								}
 							} else if functionResponseResult.Raw != "" {
-								functionResponseJSON, _ = sjson.SetRawBytes(functionResponseJSON, "response.result", []byte(functionResponseResult.Raw))
+								functionResponseJSON = translatorcommon.SetGeminiFunctionResponseResult(functionResponseJSON, "response.result", functionResponseResult)
 							} else {
 								// Content field is missing entirely — .Raw is empty which
 								// causes sjson.SetRaw to produce invalid JSON (e.g. "result":}).
@@ -577,11 +740,29 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 							partJSON := []byte(`{}`)
 							partJSON, _ = sjson.SetRawBytes(partJSON, "inlineData", inlineDataJSON)
 							partItems = append(partItems, partJSON)
+						} else if originalRole == "user" {
+							// A part that cannot be inlined (url or file source) is dropped; the turn is refused only if nothing else is left.
+							drops.Drop("image")
+						}
+					} else if contentTypeResult.Type == gjson.String && (contentTypeResult.String() == "document" || contentTypeResult.String() == "container_upload") {
+						if partJSON := claudeBase64InlineData(contentResult.Get("source")); partJSON != nil {
+							partItems = append(partItems, partJSON)
+						} else if originalRole == "user" {
+							drops.Drop(contentTypeResult.String())
 						}
 					}
 				}
+				if pendingDetachedSignature != "" {
+					appendDetachedCarrier(pendingDetachedSignature, false)
+					clearPendingDetachedSignature()
+				}
 
-				// Reorder model parts: thinking first, regular content second, function calls last.
+				if originalRole == "user" {
+					// Whitespace-only text is forwarded but never keeps an emptied turn alive.
+					drops.EndTurn(translatorcommon.CountSendableGeminiParts(partItems))
+				}
+
+				// Reorder model parts: thinking first, regular content second, function calls and trailing signature carriers last.
 				if len(partItems) == 0 {
 					continue
 				}
@@ -589,18 +770,22 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 				if role == "model" && len(partItems) > 1 {
 					var thinkingParts [][]byte
 					var regularParts [][]byte
-					var functionCallParts [][]byte
+					var trailingParts [][]byte
 					needsReorder := false
 					previousCategory := -1
+					seenFunctionCall := false
 					for _, partJSON := range partItems {
 						part := gjson.ParseBytes(partJSON)
 						category := 1
+						isSignatureCarrier := part.Get("text").Exists() && part.Get("text").String() == "" && strings.TrimSpace(part.Get("thoughtSignature").String()) != ""
+						isFunctionTailCarrier := isSignatureCarrier && seenFunctionCall
 						if part.Get("thought").Bool() {
 							category = 0
 							thinkingParts = append(thinkingParts, partJSON)
-						} else if part.Get("functionCall").Exists() {
+						} else if part.Get("functionCall").Exists() || isFunctionTailCarrier {
 							category = 2
-							functionCallParts = append(functionCallParts, partJSON)
+							trailingParts = append(trailingParts, partJSON)
+							seenFunctionCall = seenFunctionCall || part.Get("functionCall").Exists()
 						} else {
 							regularParts = append(regularParts, partJSON)
 						}
@@ -611,7 +796,7 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 						newParts := make([][]byte, 0, len(partItems))
 						newParts = append(newParts, thinkingParts...)
 						newParts = append(newParts, regularParts...)
-						newParts = append(newParts, functionCallParts...)
+						newParts = append(newParts, trailingParts...)
 						clientContentJSON, _ = sjson.SetRawBytes(clientContentJSON, "parts", translatorcommon.JoinRawArray(newParts))
 					}
 				}
@@ -675,8 +860,22 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 	out := []byte(`{"model":"","request":{"contents":[]}}`)
 	out, _ = sjson.SetBytes(out, "model", modelName)
 
+	// tool_choice metadata
+	toolChoiceResult := gjson.GetBytes(rawJSON, "tool_choice")
+	toolChoiceType := ""
+	toolChoiceName := ""
+	if toolChoiceResult.Exists() {
+		if toolChoiceResult.IsObject() {
+			toolChoiceType = toolChoiceResult.Get("type").String()
+			toolChoiceName = toolChoiceResult.Get("name").String()
+		} else if toolChoiceResult.Type == gjson.String {
+			toolChoiceType = toolChoiceResult.String()
+		}
+	}
+	isToolChoiceNone := strings.EqualFold(strings.TrimSpace(toolChoiceType), "none")
+
 	// Inject interleaved thinking hint when both tools and thinking are active
-	hasTools := toolDeclCount > 0
+	hasTools := toolDeclCount > 0 && !isToolChoiceNone
 	thinkingResult := gjson.GetBytes(rawJSON, "thinking")
 	thinkingType := thinkingResult.Get("type").String()
 	hasThinking := thinkingResult.Exists() && thinkingResult.IsObject() && (thinkingType == "enabled" || thinkingType == "adaptive" || thinkingType == "auto")
@@ -694,29 +893,25 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 		out, _ = sjson.SetRawBytes(out, "request.systemInstruction", antigravityClaudeContent("user", systemParts))
 	}
 	if len(contentItems) > 0 {
-		out = translatorcommon.SetRawArrayItems(out, "request.contents", contentItems)
+		if util.IsClaudeModel(modelName) {
+			contentItems = translatorcommon.SplitGeminiFunctionResponseTurns(contentItems)
+			out = translatorcommon.SetRawArrayItems(out, "request.contents", translatorcommon.MergeAdjacentGeminiUserContents(contentItems))
+		} else {
+			out = translatorcommon.SetRawArrayItems(out, "request.contents", translatorcommon.MergeAdjacentGeminiContents(contentItems))
+		}
 	}
-	if toolDeclCount > 0 {
+	if toolDeclCount > 0 && !isToolChoiceNone {
 		out, _ = sjson.SetRawBytes(out, "request.tools", toolsJSON)
 	}
 
 	// tool_choice
-	toolChoiceResult := gjson.GetBytes(rawJSON, "tool_choice")
 	if toolChoiceResult.Exists() {
-		toolChoiceType := ""
-		toolChoiceName := ""
-		if toolChoiceResult.IsObject() {
-			toolChoiceType = toolChoiceResult.Get("type").String()
-			toolChoiceName = toolChoiceResult.Get("name").String()
-		} else if toolChoiceResult.Type == gjson.String {
-			toolChoiceType = toolChoiceResult.String()
-		}
-
-		switch toolChoiceType {
+		switch strings.ToLower(strings.TrimSpace(toolChoiceType)) {
 		case "auto":
 			out, _ = sjson.SetBytes(out, "request.toolConfig.functionCallingConfig.mode", "AUTO")
 		case "none":
 			out, _ = sjson.SetBytes(out, "request.toolConfig.functionCallingConfig.mode", "NONE")
+			out, _ = sjson.DeleteBytes(out, "request.tools")
 		case "any":
 			out, _ = sjson.SetBytes(out, "request.toolConfig.functionCallingConfig.mode", "ANY")
 		case "tool":
@@ -734,7 +929,6 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 			if b := t.Get("budget_tokens"); b.Exists() && b.Type == gjson.Number {
 				budget := int(b.Int())
 				out, _ = sjson.SetBytes(out, "request.generationConfig.thinkingConfig.thinkingBudget", budget)
-				out, _ = sjson.SetBytes(out, "request.generationConfig.thinkingConfig.includeThoughts", true)
 			}
 		case "adaptive", "auto":
 			// For adaptive thinking:
@@ -750,7 +944,6 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 			} else {
 				out, _ = sjson.SetBytes(out, "request.generationConfig.thinkingConfig.thinkingLevel", "high")
 			}
-			out, _ = sjson.SetBytes(out, "request.generationConfig.thinkingConfig.includeThoughts", true)
 		}
 	}
 	if v := gjson.GetBytes(rawJSON, "temperature"); v.Exists() && v.Type == gjson.Number {
@@ -767,8 +960,31 @@ func ConvertClaudeRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 	}
 
 	out = common.AttachDefaultSafetySettings(out, "request.safetySettings")
+	if sigcompat.SignatureProviderFromModelName(modelName) == sigcompat.SignatureProviderGemini {
+		out = sigcompat.SanitizeGeminiRequestThoughtSignatures(out, "request.contents")
+	}
 
-	return out
+	return out, drops.Err()
+}
+
+// claudeBase64InlineData converts a Claude base64 source into an Antigravity
+// inlineData part. A file id or url carries no bytes, so it stays unconverted
+// and the caller reports it.
+func claudeBase64InlineData(source gjson.Result) []byte {
+	if source.Get("type").String() != "base64" {
+		return nil
+	}
+	mimeType := source.Get("media_type").String()
+	data := source.Get("data").String()
+	if mimeType == "" || data == "" {
+		return nil
+	}
+	inlineDataJSON := []byte(`{}`)
+	inlineDataJSON, _ = sjson.SetBytes(inlineDataJSON, "mimeType", mimeType)
+	inlineDataJSON, _ = sjson.SetBytes(inlineDataJSON, "data", data)
+	partJSON := []byte(`{}`)
+	partJSON, _ = sjson.SetRawBytes(partJSON, "inlineData", inlineDataJSON)
+	return partJSON
 }
 
 func antigravityClaudeContent(role string, parts [][]byte) []byte {

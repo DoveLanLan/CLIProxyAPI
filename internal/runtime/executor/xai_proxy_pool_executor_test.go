@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 type executorPoolConfig struct {
@@ -219,8 +219,8 @@ func TestXAIProxyPoolWebsocketTargetChangesWhenLaneNodeChanges(t *testing.T) {
 	second := cloneXAIAuthWithRoute(auth, helps.XAIProxyRoute{
 		LaneName: "lane-1", ProxyURL: "http://mihomo:17891", Node: "node-2",
 	})
-	if xaiProxySessionTarget(first) == xaiProxySessionTarget(second) {
-		t.Fatalf("websocket targets did not change: %q", xaiProxySessionTarget(first))
+	if xaiProxySessionTarget(context.Background(), nil, first) == xaiProxySessionTarget(context.Background(), nil, second) {
+		t.Fatalf("websocket targets did not change: %q", xaiProxySessionTarget(context.Background(), nil, first))
 	}
 	restored := restoreXAIAuthProxy(second, auth)
 	if restored.ProxyURL != "" || restored.Attributes[xaiProxyRouteAttribute] != "" {

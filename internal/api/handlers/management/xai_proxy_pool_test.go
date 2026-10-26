@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 type managementXAIProxyPoolExecutor struct {
@@ -178,7 +178,7 @@ func TestRotateAndQuarantineXAIProxyPool(t *testing.T) {
 func TestExecuteAPIRequestUsesRegisteredXAIExecutor(t *testing.T) {
 	h, executor, auth := newManagementXAIProxyPoolHandler(t, true)
 	req := httptest.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/responses", bytes.NewBufferString(`{}`))
-	resp, errExecute := h.executeAPIRequest(context.Background(), auth, req)
+	resp, errExecute := h.executeAPIRequest(context.Background(), auth, req, "")
 	if errExecute != nil {
 		t.Fatalf("executeAPIRequest() error = %v", errExecute)
 	}

@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	sdkpluginstore "github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginstore"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	sdkpluginstore "github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginstore"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,6 +41,16 @@ func (r *fakePluginRuntime) UnloadPlugin(id string) bool {
 
 func (i fakePluginLoadInspector) PluginRegistered(id string) bool {
 	return i[id]
+}
+
+type contextPluginRuntime struct {
+	fakePluginRuntime
+	unloadContext context.Context
+}
+
+func (r *contextPluginRuntime) UnloadPluginContext(ctx context.Context, id string) bool {
+	r.unloadContext = ctx
+	return r.UnloadPlugin(id)
 }
 
 func TestSyncPlatformInstallsManifestArtifact(t *testing.T) {
@@ -650,6 +660,54 @@ func TestDeleteWithReportRemovesAllCurrentPlatformPluginVersions(t *testing.T) {
 	}
 	if _, errStat := os.Stat(otherTarget); errStat != nil {
 		t.Fatalf("other plugin stat error = %v, want retained", errStat)
+	}
+}
+
+func TestDeleteWithReportStopsBeforeUnloadWhenContextCanceled(t *testing.T) {
+	root := t.TempDir()
+	path := pluginTestPath(root, runtime.GOOS, runtime.GOARCH, "sample", "1.0.0")
+	if errMkdir := os.MkdirAll(filepath.Dir(path), 0o755); errMkdir != nil {
+		t.Fatal(errMkdir)
+	}
+	if errWrite := os.WriteFile(path, []byte("plugin"), 0o644); errWrite != nil {
+		t.Fatal(errWrite)
+	}
+	runtimeHost := &contextPluginRuntime{fakePluginRuntime: fakePluginRuntime{busy: true}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	report := DeleteWithReport(ctx, syncTestConfig(t, root), runtimeHost, 44, "sample")
+
+	if report.OK || !strings.Contains(report.Error, context.Canceled.Error()) {
+		t.Fatalf("canceled delete report = %+v, want context cancellation", report)
+	}
+	if runtimeHost.unloadContext != nil || len(runtimeHost.unloaded) != 0 {
+		t.Fatalf("canceled delete unloaded plugin: context=%v unloads=%v", runtimeHost.unloadContext, runtimeHost.unloaded)
+	}
+	if _, errStat := os.Stat(path); errStat != nil {
+		t.Fatalf("canceled delete removed plugin artifact: %v", errStat)
+	}
+}
+
+func TestDeleteWithReportUsesContextualUnload(t *testing.T) {
+	root := t.TempDir()
+	path := pluginTestPath(root, runtime.GOOS, runtime.GOARCH, "sample", "1.0.0")
+	if errMkdir := os.MkdirAll(filepath.Dir(path), 0o755); errMkdir != nil {
+		t.Fatal(errMkdir)
+	}
+	if errWrite := os.WriteFile(path, []byte("plugin"), 0o644); errWrite != nil {
+		t.Fatal(errWrite)
+	}
+	runtimeHost := &contextPluginRuntime{fakePluginRuntime: fakePluginRuntime{busy: true}}
+	ctx := context.WithValue(context.Background(), struct{}{}, "contextual")
+
+	report := DeleteWithReport(ctx, syncTestConfig(t, root), runtimeHost, 45, "sample")
+
+	if !report.OK {
+		t.Fatalf("contextual delete report = %+v", report)
+	}
+	if runtimeHost.unloadContext != ctx || len(runtimeHost.unloaded) != 1 || runtimeHost.unloaded[0] != "sample" {
+		t.Fatalf("contextual unload = context=%v unloads=%v", runtimeHost.unloadContext, runtimeHost.unloaded)
 	}
 }
 

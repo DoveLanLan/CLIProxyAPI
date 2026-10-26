@@ -11,19 +11,21 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	. "github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
+	claudemodels "github.com/router-for-me/CLIProxyAPI/v8/internal/client/claude/models"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
+	. "github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -72,7 +74,7 @@ func (h *ClaudeCodeAPIHandler) ClaudeMessages(c *gin.Context) {
 	rawJSON, err := c.GetRawData()
 	// If data retrieval fails, return a 400 Bad Request error.
 	if err != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+		c.JSON(clienterror.HTTPStatusFromErrorOr(err, http.StatusBadRequest), handlers.ErrorResponse{
 			Error: handlers.ErrorDetail{
 				Message: fmt.Sprintf("Invalid request: %v", err),
 				Type:    "invalid_request_error",
@@ -104,7 +106,7 @@ func (h *ClaudeCodeAPIHandler) ClaudeCountTokens(c *gin.Context) {
 	rawJSON, err := c.GetRawData()
 	// If data retrieval fails, return a 400 Bad Request error.
 	if err != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+		c.JSON(clienterror.HTTPStatusFromErrorOr(err, http.StatusBadRequest), handlers.ErrorResponse{
 			Error: handlers.ErrorDetail{
 				Message: fmt.Sprintf("Invalid request: %v", err),
 				Type:    "invalid_request_error",
@@ -138,7 +140,7 @@ func (h *ClaudeCodeAPIHandler) ClaudeCountTokens(c *gin.Context) {
 // back into the original model name used for routing and upstream requests.
 func rewriteClaudeDDModelInBody(rawJSON []byte) []byte {
 	modelName := gjson.GetBytes(rawJSON, "model").String()
-	resolved := util.ResolveClaudeModelIDPrefix(modelName)
+	resolved := claudemodels.ResolveClaudeModelIDPrefix(modelName)
 	if resolved == modelName {
 		return rawJSON
 	}
@@ -155,45 +157,9 @@ func rewriteClaudeDDModelInBody(rawJSON []byte) []byte {
 // Parameters:
 //   - c: The Gin context for the request.
 func (h *ClaudeCodeAPIHandler) ClaudeModels(c *gin.Context) {
-	models := h.Models()
-	for i := range models {
-		if id, ok := models[i]["id"].(string); ok {
-			models[i]["id"] = util.EnsureClaudeModelIDPrefix(id)
-		}
-	}
-	sortClaudeModelsByDisplayName(models)
-	firstID := ""
-	lastID := ""
-	if len(models) > 0 {
-		if id, ok := models[0]["id"].(string); ok {
-			firstID = id
-		}
-		if id, ok := models[len(models)-1]["id"].(string); ok {
-			lastID = id
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"data":     models,
-		"has_more": false,
-		"first_id": firstID,
-		"last_id":  lastID,
-	})
-}
-
-// sortClaudeModelsByDisplayName sorts models by display_name ascending.
-// When display_name is equal or missing, id is used as a stable tie-breaker.
-func sortClaudeModelsByDisplayName(models []map[string]any) {
-	sort.SliceStable(models, func(i, j int) bool {
-		di, _ := models[i]["display_name"].(string)
-		dj, _ := models[j]["display_name"].(string)
-		if di != dj {
-			return di < dj
-		}
-		idi, _ := models[i]["id"].(string)
-		idj, _ := models[j]["id"].(string)
-		return idi < idj
-	})
+	cfg := h.CurrentConfig()
+	disableCloaking := cfg != nil && cfg.ClaudeCode.DisableCloakingModelList
+	h.WriteModelListResponse(c, h.HandlerType(), claudemodels.BuildResponse(h.Models(), disableCloaking))
 }
 
 // handleNonStreamingResponse handles non-streaming content generation requests for Claude models.
@@ -280,9 +246,32 @@ func (h *ClaudeCodeAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON [
 		c.Header("Connection", "keep-alive")
 		c.Header("Access-Control-Allow-Origin", "*")
 	}
-	stopBootstrapKeepAlive := h.StartStreamingBootstrapKeepAlive(c, cliCtx, setSSEHeaders)
-	dataChan, upstreamHeaders, errChan := h.ExecuteStreamWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, "")
-	bootstrapHeartbeatWritten := stopBootstrapKeepAlive()
+	var upstreamHeaders http.Header
+	committed := false
+	commitSSE := func() {
+		if committed {
+			return
+		}
+		setSSEHeaders()
+		handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+		committed = true
+	}
+	writeKeepAlive := func() bool {
+		commitSSE()
+		_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
+		flusher.Flush()
+		return true
+	}
+	keepAliveC, stopKeepAlive := handlers.NewPreFirstTokenKeepAliveTicker(h.CurrentConfig())
+	defer stopKeepAlive()
+
+	dataChan, resolvedHeaders, errChan, okBootstrap := h.ExecuteStreamWithPreFTKeepAlive(
+		c, cliCtx, func(err error) { cliCancel(err) }, h.HandlerType(), modelName, rawJSON, "", keepAliveC, writeKeepAlive,
+	)
+	if !okBootstrap {
+		return
+	}
+	upstreamHeaders = resolvedHeaders
 
 	// Peek at the first chunk to determine success or failure before setting headers
 	for {
@@ -296,8 +285,16 @@ func (h *ClaudeCodeAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON [
 				errChan = nil
 				continue
 			}
-			// Preserve an HTTP startup error unless a bootstrap heartbeat already committed SSE.
-			h.writeClaudeStreamStartupError(c, flusher, errMsg, bootstrapHeartbeatWritten)
+			if committed {
+				stopKeepAlive()
+				pendingErrors := make(chan *interfaces.ErrorMessage, 1)
+				pendingErrors <- errMsg
+				close(pendingErrors)
+				h.forwardClaudeStream(c, flusher, func(err error) { cliCancel(err) }, make(chan []byte), pendingErrors)
+				return
+			}
+			// Upstream failed immediately. Return proper error status and JSON.
+			h.WriteErrorResponse(c, errMsg)
 			if errMsg != nil {
 				cliCancel(errMsg.Error)
 			} else {
@@ -306,8 +303,16 @@ func (h *ClaudeCodeAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON [
 			return
 		case chunk, ok := <-dataChan:
 			if !ok {
-				if errMsg, okPendingErr := pendingClaudeStreamError(errChan); okPendingErr {
-					h.writeClaudeStreamStartupError(c, flusher, errMsg, bootstrapHeartbeatWritten)
+				stopKeepAlive()
+				if errMsg, hasPendingError := handlers.PendingStreamError(errChan); hasPendingError {
+					if committed {
+						pendingErrors := make(chan *interfaces.ErrorMessage, 1)
+						pendingErrors <- errMsg
+						close(pendingErrors)
+						h.forwardClaudeStream(c, flusher, func(err error) { cliCancel(err) }, make(chan []byte), pendingErrors)
+						return
+					}
+					h.WriteErrorResponse(c, errMsg)
 					if errMsg != nil {
 						cliCancel(errMsg.Error)
 					} else {
@@ -315,93 +320,213 @@ func (h *ClaudeCodeAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON [
 					}
 					return
 				}
-				// Stream closed without data? Send DONE or just headers.
-				setSSEHeaders()
-				handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
-				flusher.Flush()
-				cliCancel(nil)
+				// Stream closed without data: delegate to forwardClaudeStream with the closed dataChan to surface missing message_stop.
+				commitSSE()
+				h.forwardClaudeStream(c, flusher, func(err error) { cliCancel(err) }, dataChan, errChan)
 				return
 			}
 
 			// Success! Set headers now.
-			setSSEHeaders()
-			handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+			stopKeepAlive()
+			commitSSE()
 
 			// Write the first chunk
+			var streamState claudeSSEStreamState
+			streamState.trailingNewlines = 2
+			streamState.ObserveChunk(chunk)
 			if len(chunk) > 0 {
 				_, _ = c.Writer.Write(chunk)
 				flusher.Flush()
 			}
 
 			// Continue streaming the rest
-			h.forwardClaudeStream(c, flusher, func(err error) { cliCancel(err) }, dataChan, errChan)
+			h.forwardClaudeStreamWithState(c, flusher, func(err error) { cliCancel(err) }, dataChan, errChan, &streamState)
 			return
+		case <-keepAliveC:
+			writeKeepAlive()
 		}
 	}
 }
 
-func (h *ClaudeCodeAPIHandler) writeClaudeStreamStartupError(c *gin.Context, flusher http.Flusher, errMsg *interfaces.ErrorMessage, responseCommitted bool) {
-	if !responseCommitted {
-		h.WriteErrorResponse(c, errMsg)
+type claudeSSEStreamState struct {
+	sawErrorEvent      bool
+	sawMessageStop     bool
+	sawBareMessageJSON bool
+	trailingNewlines   int
+	currentEvent       string
+	eventData          [][]byte
+	lineBuf            bytes.Buffer
+}
+
+func (s *claudeSSEStreamState) ObserveChunk(chunk []byte) {
+	if len(chunk) == 0 {
 		return
 	}
-	if errMsg == nil {
-		errMsg = &interfaces.ErrorMessage{StatusCode: http.StatusInternalServerError}
-	}
-	h.writeClaudeStreamError(c, errMsg)
-	flusher.Flush()
-}
-
-func pendingClaudeStreamError(errs <-chan *interfaces.ErrorMessage) (*interfaces.ErrorMessage, bool) {
-	if errs == nil {
-		return nil, false
-	}
-	select {
-	case errMsg, ok := <-errs:
-		if !ok {
-			return nil, false
+	s.trailingNewlines = advanceClaudeSSENewlineCount(s.trailingNewlines, chunk)
+	for _, b := range chunk {
+		if b == '\n' {
+			s.observeLine(s.lineBuf.Bytes())
+			s.lineBuf.Reset()
+			continue
 		}
-		return errMsg, true
-	default:
-		return nil, false
+		s.lineBuf.WriteByte(b)
 	}
 }
 
-func (h *ClaudeCodeAPIHandler) forwardClaudeStream(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage) {
+func (s *claudeSSEStreamState) FlushPendingLine() {
+	if s.lineBuf.Len() > 0 {
+		s.observeLine(s.lineBuf.Bytes())
+		s.lineBuf.Reset()
+	}
+	s.flushEventData()
+}
+
+func (s *claudeSSEStreamState) flushEventData() {
+	if len(s.eventData) > 0 {
+		joined := bytes.TrimSpace(bytes.Join(s.eventData, []byte("\n")))
+		s.eventData = s.eventData[:0]
+		if len(joined) > 0 && gjson.ValidBytes(joined) {
+			s.observeJSONPayload(joined, true)
+		}
+	}
+}
+
+func (s *claudeSSEStreamState) ensureSSEEventBoundary(w io.Writer) {
+	if s.sawBareMessageJSON {
+		return
+	}
+	switch s.trailingNewlines {
+	case 0:
+		_, _ = w.Write([]byte("\n\n"))
+	case 1:
+		_, _ = w.Write([]byte("\n"))
+	}
+	s.trailingNewlines = 2
+}
+
+func (s *claudeSSEStreamState) observeLine(line []byte) {
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		s.flushEventData()
+		s.currentEvent = ""
+		return
+	}
+	if bytes.HasPrefix(trimmed, []byte("event:")) {
+		s.currentEvent = strings.TrimSpace(string(trimmed[len("event:"):]))
+		return
+	}
+	if bytes.HasPrefix(trimmed, []byte("data:")) {
+		payload := bytes.TrimSpace(trimmed[len("data:"):])
+		if len(payload) > 0 {
+			s.eventData = append(s.eventData, append([]byte(nil), payload...))
+		}
+		return
+	}
+	if !bytes.HasPrefix(trimmed, []byte("{")) || !gjson.ValidBytes(trimmed) {
+		return
+	}
+	s.observeJSONPayload(trimmed, false)
+}
+
+func (s *claudeSSEStreamState) observeJSONPayload(payload []byte, hasDataPrefix bool) {
+	root := gjson.ParseBytes(payload)
+	switch root.Get("type").String() {
+	case "message_stop":
+		s.sawMessageStop = true
+	case "error":
+		s.sawErrorEvent = true
+	case "message":
+		if !hasDataPrefix && strings.TrimSpace(root.Get("stop_reason").String()) != "" {
+			s.sawMessageStop = true
+			s.sawBareMessageJSON = true
+		}
+	default:
+		if hasDataPrefix && s.currentEvent == "error" && root.Get("error").Exists() {
+			s.sawErrorEvent = true
+		}
+	}
+}
+
+func advanceClaudeSSENewlineCount(prev int, chunk []byte) int {
+	count := prev
+	for _, b := range chunk {
+		switch b {
+		case '\r':
+			continue
+		case '\n':
+			if count < 2 {
+				count++
+			}
+		default:
+			count = 0
+		}
+	}
+	return count
+}
+
+func (h *ClaudeCodeAPIHandler) forwardClaudeStream(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage, initialErrorWritten ...bool) {
+	state := &claudeSSEStreamState{
+		sawErrorEvent:    len(initialErrorWritten) > 0 && initialErrorWritten[0],
+		trailingNewlines: 2,
+	}
+	h.forwardClaudeStreamWithState(c, flusher, cancel, data, errs, state)
+}
+
+func (h *ClaudeCodeAPIHandler) forwardClaudeStreamWithState(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage, state *claudeSSEStreamState) {
+	if state == nil {
+		state = &claudeSSEStreamState{trailingNewlines: 2}
+	}
 	h.ForwardStream(c, flusher, cancel, data, errs, handlers.StreamForwardOptions{
 		WriteChunk: func(chunk []byte) {
 			if len(chunk) == 0 {
 				return
 			}
+			state.ObserveChunk(chunk)
 			_, _ = c.Writer.Write(chunk)
 		},
 		WriteTerminalError: func(errMsg *interfaces.ErrorMessage) {
-			h.writeClaudeStreamError(c, errMsg)
+			state.FlushPendingLine()
+			if errMsg == nil {
+				return
+			}
+			if state.sawErrorEvent {
+				state.ensureSSEEventBoundary(c.Writer)
+				return
+			}
+			state.ensureSSEEventBoundary(c.Writer)
+
+			errorBytes, _ := json.Marshal(h.toClaudeError(errMsg))
+			_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errorBytes)
+		},
+		CloseError: func() *interfaces.ErrorMessage {
+			state.FlushPendingLine()
+			if state.sawMessageStop || state.sawErrorEvent {
+				return nil
+			}
+			return &interfaces.ErrorMessage{
+				StatusCode: http.StatusBadGateway,
+				Error:      fmt.Errorf("upstream stream closed before message_stop"),
+			}
+		},
+		WriteDone: func() {
+			state.FlushPendingLine()
+			if state.sawMessageStop || state.sawErrorEvent {
+				state.ensureSSEEventBoundary(c.Writer)
+			}
 		},
 	})
 }
 
-func (h *ClaudeCodeAPIHandler) writeClaudeStreamError(c *gin.Context, errMsg *interfaces.ErrorMessage) {
-	if errMsg == nil {
-		return
-	}
-	status := http.StatusInternalServerError
-	if errMsg.StatusCode > 0 {
-		status = errMsg.StatusCode
-	}
-	if !c.Writer.Written() {
-		c.Status(status)
-	}
-
-	errorBytes, _ := json.Marshal(h.toClaudeError(errMsg))
-	_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errorBytes)
+type claudeErrorDetail struct {
+	Type          string              `json:"type"`
+	Message       string              `json:"message"`
+	Code          string              `json:"code,omitempty"`
+	UpstreamModel string              `json:"upstream_model,omitempty"`
+	Details       *claudeErrorDetails `json:"details,omitempty"`
 }
 
-type claudeErrorDetail struct {
-	Type          string `json:"type"`
-	Message       string `json:"message"`
-	Code          string `json:"code,omitempty"`
-	UpstreamModel string `json:"upstream_model,omitempty"`
+type claudeErrorDetails struct {
+	ErrorCode string `json:"error_code"`
 }
 
 type claudeErrorResponse struct {
@@ -419,7 +544,7 @@ func (h *ClaudeCodeAPIHandler) toClaudeError(msg *interfaces.ErrorMessage) claud
 			errText = http.StatusText(status)
 		}
 		if msg.Error != nil {
-			if v := strings.TrimSpace(msg.Error.Error()); v != "" {
+			if v := strings.TrimSpace(claudeErrorText(msg.Error)); v != "" {
 				errText = v
 			}
 		}
@@ -428,11 +553,15 @@ func (h *ClaudeCodeAPIHandler) toClaudeError(msg *interfaces.ErrorMessage) claud
 	if requestID == "" && msg != nil {
 		requestID = claudeRequestIDFromHeaders(msg.Addon)
 	}
-	return claudeErrorResponse{
+	response := claudeErrorResponse{
 		Type:      "error",
 		RequestID: requestID,
 		Error:     detail,
 	}
+	if clienterror.IsClaudeThreadNotFound(status, errors.New(errText)) {
+		response.Error.Details = &claudeErrorDetails{ErrorCode: "thread_not_found"}
+	}
+	return response
 }
 
 func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.ErrorMessage) {
@@ -440,7 +569,39 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 	if msg != nil && msg.StatusCode > 0 {
 		status = msg.StatusCode
 	}
-	if msg != nil && msg.Addon != nil && handlers.PassthroughHeadersEnabled(h.Cfg) {
+	if msg != nil && msg.DirectResponse {
+		for key, values := range handlers.FilterUpstreamHeaders(msg.Headers) {
+			if len(values) == 0 || handlers.IsCPAReservedResponseHeader(key) {
+				continue
+			}
+			c.Writer.Header().Del(key)
+			for _, value := range values {
+				c.Writer.Header().Add(key, value)
+			}
+		}
+		body := bytes.Clone(msg.Body)
+		if clienterror.IsClaudeThreadNotFound(status, errors.New(string(body))) {
+			if markedBody, errMarshal := json.Marshal(h.toClaudeError(&interfaces.ErrorMessage{
+				StatusCode: status,
+				Error:      errors.New(string(body)),
+			})); errMarshal == nil {
+				body = markedBody
+			}
+		}
+		appendClaudeAPIResponse(c, body)
+		if !c.Writer.Written() && c.Writer.Header().Get("Content-Type") == "" {
+			c.Writer.Header().Set("Content-Type", "application/json")
+		}
+		c.Status(status)
+		_, _ = c.Writer.Write(body)
+		return
+	}
+	if msg != nil && msg.Error != nil {
+		for _, value := range coreauth.SafeResponseHeaders(msg.Error).Values("Retry-After") {
+			c.Writer.Header().Add("Retry-After", value)
+		}
+	}
+	if msg != nil && msg.Addon != nil && handlers.PassthroughHeadersEnabled(h.CurrentConfig()) {
 		for key, values := range msg.Addon {
 			if len(values) == 0 || handlers.IsCPAReservedResponseHeader(key) {
 				continue
@@ -462,6 +623,20 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 	}
 	c.Status(status)
 	_, _ = c.Writer.Write(body)
+}
+
+func claudeErrorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	type responseBodyProvider interface {
+		ResponseBody() []byte
+	}
+	var responseBody responseBodyProvider
+	if errors.As(err, &responseBody) && responseBody != nil && len(responseBody.ResponseBody()) > 0 {
+		return string(responseBody.ResponseBody())
+	}
+	return err.Error()
 }
 
 func claudeErrorDetailFromText(status int, errText string) (claudeErrorDetail, string) {
@@ -519,6 +694,8 @@ func claudeErrorDetailFromText(status int, errText string) (claudeErrorDetail, s
 	return detail, requestID
 }
 
+// safeClaudeErrorMetadata keeps short, well-formed upstream error metadata
+// (code / upstream model) so clients can react without leaking oversized values.
 func safeClaudeErrorMetadata(value any, maxLen int) string {
 	text, ok := value.(string)
 	if !ok {
@@ -540,6 +717,8 @@ func claudeRequestIDFromHeaders(headers http.Header) string {
 	return ""
 }
 
+// safeClaudeRequestID accepts only short, character-restricted request IDs so an
+// upstream value cannot smuggle arbitrary content into the client-visible error.
 func safeClaudeRequestID(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 256 {
@@ -569,11 +748,13 @@ func claudeErrorTypeFromStatus(status int) string {
 		return "permission_error"
 	case http.StatusNotFound:
 		return "not_found_error"
+	case http.StatusConflict:
+		return "conflict_error"
 	case http.StatusRequestEntityTooLarge:
 		return "request_too_large"
 	case http.StatusTooManyRequests:
 		return "rate_limit_error"
-	case http.StatusGatewayTimeout:
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
 		return "timeout_error"
 	case 529:
 		return "overloaded_error"

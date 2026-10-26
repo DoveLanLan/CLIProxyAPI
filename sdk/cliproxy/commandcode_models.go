@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,7 +20,7 @@ func (s *Service) commandCodeModels(ctx context.Context, auth *coreauth.Auth) []
 			continue
 		}
 		if len(entry.Models) > 0 {
-			return buildConfigModels(entry.Models, "commandcode", "commandcode")
+			return buildConfigModels(entry.Models, "commandcode", "commandcode", "commandcode")
 		}
 		break
 	}
@@ -44,5 +44,5 @@ func (s *Service) commandCodeModels(ctx context.Context, auth *coreauth.Auth) []
 	for _, id := range ids {
 		models = append(models, config.GeminiModel{Name: id})
 	}
-	return buildConfigModels(models, "commandcode", "commandcode")
+	return buildConfigModels(models, "commandcode", "commandcode", "commandcode")
 }

@@ -3,6 +3,8 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/browser"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/browser"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -256,16 +258,33 @@ func (a *CodexAuthenticator) buildAuthRecord(authSvc *codex.CodexAuth, authBundl
 		return nil, fmt.Errorf("codex token storage missing account information")
 	}
 
-	identity := codex.ExtractIdentityMetadata(tokenStorage.IDToken, tokenStorage.Email)
-
-	fileName := codex.CredentialFileName(tokenStorage.Email, identity.PlanType, identity.CodexAccountHash, true)
-	metadata := map[string]any{
-		"email":      tokenStorage.Email,
-		"account_id": tokenStorage.AccountID,
+	planType := ""
+	if tokenStorage.PlanType != "" {
+		planType = tokenStorage.PlanType
 	}
-	identity.ApplyToMetadata(metadata)
-	attributes := map[string]string{}
-	identity.ApplyToAttributes(attributes)
+	hashAccountID := ""
+	if tokenStorage.IDToken != "" {
+		if claims, errParse := codex.ParseJWTToken(tokenStorage.IDToken); errParse == nil && claims != nil {
+			if pt := strings.TrimSpace(claims.CodexAuthInfo.ChatgptPlanType); pt != "" {
+				planType = pt
+			}
+			accountID := strings.TrimSpace(claims.CodexAuthInfo.ChatgptAccountID)
+			if accountID != "" {
+				digest := sha256.Sum256([]byte(accountID))
+				hashAccountID = hex.EncodeToString(digest[:])[:8]
+			}
+		}
+	}
+	if planType == "" {
+		planType = codex.DefaultPlanType
+	}
+	tokenStorage.PlanType = planType
+
+	fileName := codex.CredentialFileName(tokenStorage.Email, planType, hashAccountID, true)
+	metadata := map[string]any{
+		"email":     tokenStorage.Email,
+		"plan_type": planType,
+	}
 
 	fmt.Println("Codex authentication successful")
 	if authBundle.APIKey != "" {
@@ -273,11 +292,13 @@ func (a *CodexAuthenticator) buildAuthRecord(authSvc *codex.CodexAuth, authBundl
 	}
 
 	return &coreauth.Auth{
-		ID:         fileName,
-		Provider:   a.Provider(),
-		FileName:   fileName,
-		Storage:    tokenStorage,
-		Metadata:   metadata,
-		Attributes: attributes,
+		ID:       fileName,
+		Provider: a.Provider(),
+		FileName: fileName,
+		Storage:  tokenStorage,
+		Metadata: metadata,
+		Attributes: map[string]string{
+			"plan_type": planType,
+		},
 	}, nil
 }
